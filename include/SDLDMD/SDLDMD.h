@@ -41,13 +41,17 @@ class SDLDMD : public RGB24DMD
   void SetRenderingMode(RenderingMode mode) { m_renderingMode = mode; }
   bool IsReady() const { return m_pRenderer != nullptr; }
   const char* GetError() const { return m_error.c_str(); }
+  const char* GetRendererName() const { return m_rendererName.c_str(); }
+  bool IsHardwareAccelerated() const { return !m_rendererName.empty() && m_rendererName != "software"; }
 
  private:
   SDL_Window* m_pWindow = nullptr;
   SDL_Renderer* m_pRenderer;
   std::string m_error;
+  std::string m_rendererName;
   int m_renderingMode = RenderingMode::Dots;
 
+  bool CreateRendererWithFallbacks();
   void RenderDots(uint8_t* pData, uint16_t width, uint16_t height);
   void RenderSmoothScaling(uint8_t* pData, uint16_t width, uint16_t height);
   void RenderXBRZ(uint8_t* pData, uint16_t width, uint16_t height);

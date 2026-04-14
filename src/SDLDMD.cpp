@@ -6,13 +6,54 @@
 
 namespace DMDUtil
 {
+bool SDLDMD::CreateRendererWithFallbacks()
+{
+#if defined(__ANDROID__) || defined(TARGET_OS_IPHONE) || defined(TARGET_OS_TV)
+  static const char* kRendererCandidates[] = {"opengles2", nullptr};
+#else
+  static const char* kRendererCandidates[] = {"opengl", "opengles2", nullptr};
+#endif
+
+  std::string lastError;
+  for (const char* rendererName : kRendererCandidates)
+  {
+    m_pRenderer = SDL_CreateRenderer(m_pWindow, rendererName);
+    if (m_pRenderer)
+    {
+      const char* const selectedRendererName = SDL_GetRendererName(m_pRenderer);
+      m_rendererName = selectedRendererName ? selectedRendererName : "";
+      return true;
+    }
+
+    if (const char* const error = SDL_GetError(); error && *error)
+    {
+      if (!lastError.empty()) lastError += "; ";
+      lastError += rendererName ? rendererName : "default";
+      lastError += ": ";
+      lastError += error;
+    }
+  }
+
+  m_error = lastError.empty() ? "SDL couldn't create a renderer." : lastError;
+  return false;
+}
+
 SDLDMD::SDLDMD(const char* title, uint16_t windowWidth, uint16_t windowHeight, uint32_t windowFlags, uint16_t width,
                uint16_t height)
     : RGB24DMD(width, height), m_pRenderer(nullptr)
 {
-  if (!SDL_CreateWindowAndRenderer(title, windowWidth, windowHeight, windowFlags, &m_pWindow, &m_pRenderer))
+  m_pWindow = SDL_CreateWindow(title, windowWidth, windowHeight, windowFlags);
+  if (!m_pWindow)
   {
     m_error = SDL_GetError();
+    m_pWindow = nullptr;
+    m_pRenderer = nullptr;
+    return;
+  }
+
+  if (!CreateRendererWithFallbacks())
+  {
+    SDL_DestroyWindow(m_pWindow);
     m_pWindow = nullptr;
     m_pRenderer = nullptr;
     return;
