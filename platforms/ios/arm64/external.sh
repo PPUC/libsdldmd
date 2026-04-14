@@ -18,7 +18,19 @@ cd external
 curl -sL https://github.com/PPUC/libdmdutil/archive/${LIBDMDUTIL_SHA}.tar.gz -o libdmdutil-${LIBDMDUTIL_SHA}.tar.gz
 tar xzf libdmdutil-${LIBDMDUTIL_SHA}.tar.gz
 mv libdmdutil-${LIBDMDUTIL_SHA} libdmdutil
-cp -r libdmdutil/include/DMDUtil ../third-party/include/
+cd libdmdutil
+BUILD_TYPE=${BUILD_TYPE} platforms/ios/arm64/external.sh
+cmake \
+   -DPLATFORM=ios \
+   -DARCH=arm64 \
+   -DBUILD_SHARED=OFF \
+   -DBUILD_STATIC=ON \
+   -DCMAKE_BUILD_TYPE=${BUILD_TYPE} \
+   -B build
+cmake --build build -- -j${NUM_PROCS}
+cp -r include/DMDUtil ../../third-party/include/
+cp build/libdmdutil.a ../../third-party/build-libs/ios/arm64/
+cd ..
 
 curl -sL https://github.com/libsdl-org/SDL/archive/${SDL_SHA}.tar.gz -o SDL-${SDL_SHA}.tar.gz
 tar xzf SDL-${SDL_SHA}.tar.gz

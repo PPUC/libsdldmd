@@ -16,7 +16,21 @@ cd external
 curl -sL https://github.com/PPUC/libdmdutil/archive/${LIBDMDUTIL_SHA}.tar.gz -o libdmdutil-${LIBDMDUTIL_SHA}.tar.gz
 tar xzf libdmdutil-${LIBDMDUTIL_SHA}.tar.gz
 mv libdmdutil-${LIBDMDUTIL_SHA} libdmdutil
-cp -r libdmdutil/include/DMDUtil ../third-party/include/
+cd libdmdutil
+cmake \
+   -G "Visual Studio 17 2022" \
+   -A Win32 \
+   -DPLATFORM=win \
+   -DARCH=x86 \
+   -DBUILD_SHARED=ON \
+   -DBUILD_STATIC=OFF \
+   -DCMAKE_BUILD_TYPE=${BUILD_TYPE} \
+   -B build
+cmake --build build --config ${BUILD_TYPE}
+cp -r include/DMDUtil ../../third-party/include/
+cp build/${BUILD_TYPE}/dmdutil.lib ../../third-party/build-libs/win/x86/
+cp build/${BUILD_TYPE}/dmdutil.dll ../../third-party/runtime-libs/win/x86/
+cd ..
 
 curl -sL https://github.com/libsdl-org/SDL/archive/${SDL_SHA}.tar.gz -o SDL-${SDL_SHA}.tar.gz
 tar xzf SDL-${SDL_SHA}.tar.gz
