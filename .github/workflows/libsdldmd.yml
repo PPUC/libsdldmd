@@ -1,0 +1,271 @@
+name: libsdldmd
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: write
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  version:
+    name: Detect version
+    runs-on: ubuntu-24.04
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - id: version
+        run: |
+          VERSION_MAJOR=$(grep -Eo "SDLDMD_VERSION_MAJOR\s+[0-9]+" include/SDLDMD/SDLDMD.h | grep -Eo "[0-9]+")
+          VERSION_MINOR=$(grep -Eo "SDLDMD_VERSION_MINOR\s+[0-9]+" include/SDLDMD/SDLDMD.h | grep -Eo "[0-9]+")
+          VERSION_PATCH=$(grep -Eo "SDLDMD_VERSION_PATCH\s+[0-9]+" include/SDLDMD/SDLDMD.h | grep -Eo "[0-9]+")
+          TAG="${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH}"
+          echo "${TAG}"
+          echo "tag=${TAG}" >> $GITHUB_OUTPUT
+      - name: Check git tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          GIT_TAG="${GITHUB_REF#refs/tags/}"
+          EXPECTED_TAG="v${{ steps.version.outputs.tag }}"
+          if [[ "${GIT_TAG}" != "${EXPECTED_TAG}" ]]; then
+            echo "Error: Git tag (${GIT_TAG}) does not match version from SDLDMD.h (v${{ steps.version.outputs.tag }})"
+            exit 1
+          fi
+
+  build:
+    name: Build libsdldmd-${{ matrix.platform }}-${{ matrix.arch }}
+    runs-on: ${{ matrix.os }}
+    needs: [ version ]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-2025, platform: win, arch: x64 }
+          - { os: windows-2025, platform: win, arch: x86 }
+          - { os: windows-2025, platform: win-mingw, arch: x64 }
+          - { os: macos-15, platform: macos, arch: arm64 }
+          - { os: macos-15, platform: macos, arch: x64 }
+          - { os: ubuntu-24.04, platform: linux, arch: x64 }
+          - { os: ubuntu-24.04-arm, platform: linux, arch: aarch64 }
+          - { os: ubuntu-24.04, platform: android, arch: arm64-v8a }
+          - { os: macos-15, platform: ios, arch: arm64 }
+          - { os: macos-15, platform: ios-simulator, arch: arm64 }
+          - { os: macos-15, platform: tvos, arch: arm64 }
+    steps:
+      - uses: actions/checkout@v6
+      - if: (matrix.platform == 'win')
+        uses: microsoft/setup-msbuild@v2
+      - if: (matrix.platform == 'win')
+        run: |
+          if [[ "${{ matrix.arch }}" == "x64" ]]; then
+            /c/msys64/usr/bin/bash.exe -l -c "pacman -S --noconfirm make diffutils mingw-w64-ucrt-x86_64-cmake"
+          else
+            /c/msys64/usr/bin/bash.exe -l -c "pacman -S --noconfirm make diffutils mingw-w64-i686-cmake"
+          fi
+      - if: (matrix.platform == 'win-mingw')
+        run: |
+          /c/msys64/usr/bin/bash.exe -l -c "pacman -S --noconfirm make diffutils mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-libwinpthread mingw-w64-ucrt-x86_64-cmake"
+      - if: (matrix.platform == 'linux')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libasound2-dev libpulse-dev libaudio-dev libjack-dev libsndio-dev \
+            libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev \
+            libxss-dev libxinerama-dev libxxf86vm-dev libwayland-dev libxkbcommon-dev \
+            libdrm-dev libgbm-dev libegl1-mesa-dev libgl1-mesa-dev libdbus-1-dev libudev-dev libibus-1.0-dev
+      - if: (matrix.platform == 'win')
+        name: Build (win)
+        run: |
+          ./platforms/${{ matrix.platform }}/${{ matrix.arch }}/external.sh
+          if [[ "${{ matrix.arch }}" == "x64" ]]; then
+            cmake \
+              -G "Visual Studio 17 2022" \
+              -DPLATFORM=${{ matrix.platform }} \
+              -DARCH=${{ matrix.arch }} \
+              -B build
+          else
+            cmake \
+              -G "Visual Studio 17 2022" \
+              -A Win32 \
+              -DPLATFORM=${{ matrix.platform }} \
+              -DARCH=${{ matrix.arch }} \
+              -B build
+          fi
+          cmake --build build --config Release
+      - if: (matrix.platform == 'win-mingw')
+        name: Build (win-mingw)
+        run: |
+          CURRENT_DIR="$(pwd)"
+          MSYSTEM=UCRT64 /c/msys64/usr/bin/bash.exe -l -c "
+            cd \"${CURRENT_DIR}\" &&
+            ./platforms/${{ matrix.platform }}/${{ matrix.arch }}/external.sh &&
+            cmake \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DPLATFORM=${{ matrix.platform }} \
+              -DARCH=${{ matrix.arch }} \
+              -B build &&
+            cmake --build build -- -j\$(nproc)
+          "
+      - if: (matrix.platform == 'macos')
+        name: Build (macos)
+        run: |
+          ./platforms/${{ matrix.platform }}/${{ matrix.arch }}/external.sh
+          cmake \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DPLATFORM=${{ matrix.platform }} \
+            -DARCH=${{ matrix.arch }} \
+            -B build
+          cmake --build build -- -j$(sysctl -n hw.ncpu)
+      - if: (matrix.platform == 'linux')
+        name: Build (linux)
+        run: |
+          ./platforms/${{ matrix.platform }}/${{ matrix.arch }}/external.sh
+          cmake \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DPLATFORM=${{ matrix.platform }} \
+            -DARCH=${{ matrix.arch }} \
+            -B build
+          cmake --build build -- -j$(nproc)
+      - if: (matrix.platform == 'android')
+        name: Build (android)
+        run: |
+          ./platforms/${{ matrix.platform }}/${{ matrix.arch }}/external.sh
+          cmake \
+            -DCMAKE_TOOLCHAIN_FILE="${ANDROID_NDK_LATEST_HOME}/build/cmake/android.toolchain.cmake" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DPLATFORM=${{ matrix.platform }} \
+            -DARCH=${{ matrix.arch }} \
+            -B build
+          cmake --build build -- -j$(nproc)
+      - if: (matrix.platform == 'ios' || matrix.platform == 'ios-simulator' || matrix.platform == 'tvos')
+        name: Build (ios/tvos)
+        run: |
+          ./platforms/${{ matrix.platform }}/${{ matrix.arch }}/external.sh
+          cmake \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DPLATFORM=${{ matrix.platform }} \
+            -DARCH=${{ matrix.arch }} \
+            -DBUILD_SHARED=OFF \
+            -DBUILD_STATIC=ON \
+            -B build
+          cmake --build build -- -j$(sysctl -n hw.ncpu)
+      - if: (matrix.platform == 'win')
+        name: Prepare artifacts (win)
+        run: |
+          mkdir tmp
+          if [[ "${{ matrix.arch }}" == "x64" ]]; then
+            cp build/Release/sdldmd64.lib tmp/
+            cp build/Release/sdldmd64.dll tmp/
+            cp third-party/build-libs/win/x64/SDL364.lib tmp/
+            cp third-party/runtime-libs/win/x64/SDL364.dll tmp/
+          else
+            cp build/Release/sdldmd.lib tmp/
+            cp build/Release/sdldmd.dll tmp/
+            cp third-party/build-libs/win/x86/SDL3.lib tmp/
+            cp third-party/runtime-libs/win/x86/SDL3.dll tmp/
+          fi
+          cp build/Release/sdldmd_static.lib tmp/
+          cd tmp && 7z a -r ../libsdldmd-${{ needs.version.outputs.tag }}-${{ matrix.platform }}-${{ matrix.arch }}.zip *
+      - if: (matrix.platform == 'win-mingw')
+        name: Prepare artifacts (win-mingw)
+        run: |
+          mkdir tmp
+          cp build/*.dll tmp/
+          cp build/*.dll.a tmp/
+          cp build/sdldmd_static.a tmp/
+          cp third-party/runtime-libs/win-mingw/x64/*.dll tmp/
+          cd tmp && 7z a -r ../libsdldmd-${{ needs.version.outputs.tag }}-${{ matrix.platform }}-${{ matrix.arch }}.zip *
+      - if: (matrix.platform == 'macos')
+        name: Prepare artifacts (macos)
+        run: |
+          mkdir tmp
+          cp build/libsdldmd.a tmp/
+          cp -a build/*.dylib tmp/
+          cp -a third-party/runtime-libs/macos/${{ matrix.arch }}/libSDL3*.dylib tmp/
+          cd tmp && tar -czvf ../libsdldmd-${{ needs.version.outputs.tag }}-${{ matrix.platform }}-${{ matrix.arch }}.tar.gz *
+      - if: (matrix.platform == 'linux')
+        name: Prepare artifacts (linux)
+        run: |
+          mkdir tmp
+          cp build/libsdldmd.a tmp/
+          cp -a build/*.so tmp/
+          cp -a build/*.so.* tmp/
+          cp -a third-party/runtime-libs/linux/${{ matrix.arch }}/libSDL3.so* tmp/
+          cd tmp && tar -czvf ../libsdldmd-${{ needs.version.outputs.tag }}-${{ matrix.platform }}-${{ matrix.arch }}.tar.gz *
+      - if: (matrix.platform == 'android')
+        name: Prepare artifacts (android)
+        run: |
+          mkdir tmp
+          cp build/libsdldmd.a tmp/
+          cp build/libsdldmd.so tmp/
+          cp third-party/runtime-libs/android/${{ matrix.arch }}/libSDL3.so tmp/
+          cd tmp && tar -czvf ../libsdldmd-${{ needs.version.outputs.tag }}-${{ matrix.platform }}-${{ matrix.arch }}.tar.gz *
+      - if: (matrix.platform == 'ios' || matrix.platform == 'ios-simulator' || matrix.platform == 'tvos')
+        name: Prepare artifacts (ios/tvos)
+        run: |
+          mkdir tmp
+          cp build/libsdldmd.a tmp/
+          cp third-party/build-libs/${{ matrix.platform }}/${{ matrix.arch }}/libSDL3.a tmp/
+          cd tmp && tar -czvf ../libsdldmd-${{ needs.version.outputs.tag }}-${{ matrix.platform }}-${{ matrix.arch }}.tar.gz *
+      - if: (matrix.platform == 'win' || matrix.platform == 'win-mingw')
+        uses: actions/upload-artifact@v7
+        with:
+          name: libsdldmd-${{ needs.version.outputs.tag }}-${{ matrix.platform }}-${{ matrix.arch }}.zip
+          path: libsdldmd-${{ needs.version.outputs.tag }}-${{ matrix.platform }}-${{ matrix.arch }}.zip
+          archive: false
+      - if: (matrix.platform != 'win' && matrix.platform != 'win-mingw')
+        uses: actions/upload-artifact@v7
+        with:
+          name: libsdldmd-${{ needs.version.outputs.tag }}-${{ matrix.platform }}-${{ matrix.arch }}.tar.gz
+          path: libsdldmd-${{ needs.version.outputs.tag }}-${{ matrix.platform }}-${{ matrix.arch }}.tar.gz
+          archive: false
+
+  post-build:
+    runs-on: macos-15
+    needs: [ version, build ]
+    name: Build libsdldmd-macos
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: libsdldmd-${{ needs.version.outputs.tag }}-macos-x64.tar.gz
+          skip-decompress: true
+      - uses: actions/download-artifact@v8
+        with:
+          name: libsdldmd-${{ needs.version.outputs.tag }}-macos-arm64.tar.gz
+          skip-decompress: true
+      - name: Combine macos architectures
+        run: |
+          mkdir macos-x64 macos-arm64
+          tar -xzvf libsdldmd-${{ needs.version.outputs.tag }}-macos-x64.tar.gz -C macos-x64
+          tar -xzvf libsdldmd-${{ needs.version.outputs.tag }}-macos-arm64.tar.gz -C macos-arm64
+          mkdir tmp
+          for filename in libsdldmd.dylib libSDL3.0.dylib libsdldmd.a; do
+            if [[ -f "macos-arm64/$filename" && -f "macos-x64/$filename" ]]; then
+              lipo -create -output "tmp/$filename" "macos-arm64/$filename" "macos-x64/$filename"
+            fi
+          done
+          find macos-arm64 -type l -name "*.dylib" -exec cp -a {} tmp/ \;
+          cd tmp && tar -czvf ../libsdldmd-${{ needs.version.outputs.tag }}-macos.tar.gz * && cd ..
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: libsdldmd-${{ needs.version.outputs.tag }}-macos.tar.gz
+          path: libsdldmd-${{ needs.version.outputs.tag }}-macos.tar.gz
+          archive: false
+      - if: startsWith(github.ref, 'refs/tags/')
+        uses: actions/download-artifact@v8
+        with:
+          path: release
+          skip-decompress: true
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          draft: true
+          files: release/**/*
