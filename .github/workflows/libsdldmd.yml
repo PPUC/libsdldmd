@@ -70,11 +70,14 @@ jobs:
           fi
       - if: (matrix.platform == 'win-mingw')
         run: |
-          /c/msys64/usr/bin/bash.exe -l -c "pacman -S --noconfirm make diffutils mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-libwinpthread mingw-w64-ucrt-x86_64-cmake"
+          /c/msys64/usr/bin/bash.exe -l -c "pacman -S --noconfirm make diffutils autoconf automake libtool mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-libwinpthread mingw-w64-ucrt-x86_64-cmake"
+      - if: (matrix.platform == 'macos' || matrix.platform == 'ios' || matrix.platform == 'ios-simulator' || matrix.platform == 'tvos')
+        run: brew install autoconf automake libtool
       - if: (matrix.platform == 'linux')
         run: |
           sudo apt-get update
           sudo apt-get install -y \
+            autoconf automake libtool pkg-config \
             libpipewire-0.3-dev libdecor-0-dev liburing-dev \
             libasound2-dev libpulse-dev libaudio-dev libjack-dev libsndio-dev \
             libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev \
