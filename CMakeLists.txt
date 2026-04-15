@@ -75,6 +75,7 @@ set(CMAKE_CXX_VISIBILITY_PRESET hidden)
 set(CMAKE_C_VISIBILITY_PRESET hidden)
 
 set(SDLDMD_SOURCES
+   src/SDLDMDConfig.cpp
    src/SDLDMD.cpp
    src/xbrz/xbrz.cpp
 )

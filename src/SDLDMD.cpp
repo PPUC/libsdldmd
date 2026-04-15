@@ -1,11 +1,102 @@
 #include "SDLDMD/SDLDMD.h"
 
+#include <algorithm>
+#include <cctype>
+#include <mutex>
 #include <vector>
 
+#include "DMDUtil/Config.h"
 #include "xbrz/xbrz.h"
 
 namespace DMDUtil
 {
+namespace
+{
+std::mutex g_sdldmdSdlMutex;
+int g_sdldmdInstanceCount = 0;
+bool g_sdldmdOwnsVideoSubsystem = false;
+
+std::string ToLower(std::string value)
+{
+  std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
+    return static_cast<char>(std::tolower(c));
+  });
+  return value;
+}
+
+const char* GetDefaultVideoDriver(const char* preferredVideoDriver)
+{
+#if defined(__linux__) && !defined(__ANDROID__)
+  if (preferredVideoDriver && *preferredVideoDriver)
+  {
+    return preferredVideoDriver;
+  }
+
+  if (SDL_getenv("SDL_VIDEODRIVER") == nullptr && SDL_getenv("DISPLAY") == nullptr &&
+      SDL_getenv("WAYLAND_DISPLAY") == nullptr)
+  {
+    return "kmsdrm";
+  }
+#else
+  (void)preferredVideoDriver;
+#endif
+  return preferredVideoDriver;
+}
+
+SDLDMDConfig* GetInstalledSDLDMDConfig()
+{
+  return dynamic_cast<SDLDMDConfig*>(Config::GetInstance());
+}
+
+bool ResolveWindowPositionForScreen(int screenIndex, int windowX, int windowY, int* pResolvedX, int* pResolvedY)
+{
+  if (pResolvedX == nullptr || pResolvedY == nullptr)
+  {
+    return false;
+  }
+
+  *pResolvedX = windowX;
+  *pResolvedY = windowY;
+  if (screenIndex < 0)
+  {
+    return true;
+  }
+
+  int numDisplays = 0;
+  SDL_DisplayID* pDisplays = SDL_GetDisplays(&numDisplays);
+  if (pDisplays == nullptr)
+  {
+    return false;
+  }
+
+  const bool validDisplay = screenIndex < numDisplays;
+  SDL_DisplayID displayId = 0;
+  if (validDisplay)
+  {
+    displayId = pDisplays[screenIndex];
+  }
+  SDL_free(pDisplays);
+
+  if (!validDisplay)
+  {
+    SDL_SetError("Invalid screen index %d", screenIndex);
+    return false;
+  }
+
+  SDL_Rect displayBounds;
+  if (!SDL_GetDisplayBounds(displayId, &displayBounds))
+  {
+    return false;
+  }
+
+  const int relativeX = (windowX == SDL_WINDOWPOS_UNDEFINED) ? 0 : windowX;
+  const int relativeY = (windowY == SDL_WINDOWPOS_UNDEFINED) ? 0 : windowY;
+  *pResolvedX = displayBounds.x + relativeX;
+  *pResolvedY = displayBounds.y + relativeY;
+  return true;
+}
+}  // namespace
+
 bool SDLDMD::CreateRendererWithFallbacks()
 {
 #if defined(__ANDROID__) || defined(TARGET_OS_IPHONE) || defined(TARGET_OS_TV)
@@ -39,9 +130,33 @@ bool SDLDMD::CreateRendererWithFallbacks()
 }
 
 SDLDMD::SDLDMD(const char* title, uint16_t windowWidth, uint16_t windowHeight, uint32_t windowFlags, uint16_t width,
-               uint16_t height)
-    : RGB24DMD(width, height), m_pRenderer(nullptr)
+               uint16_t height, int screenIndex, int windowX, int windowY, RenderingMode renderingMode,
+               const char* preferredVideoDriver)
+    : RGB24DMD(width, height), m_pRenderer(nullptr), m_renderingMode(renderingMode)
 {
+  {
+    std::lock_guard<std::mutex> lock(g_sdldmdSdlMutex);
+    const char* const videoDriver = GetDefaultVideoDriver(preferredVideoDriver);
+    if (videoDriver && *videoDriver && SDL_getenv("SDL_VIDEODRIVER") == nullptr)
+    {
+      SDL_setenv("SDL_VIDEODRIVER", videoDriver, 0);
+    }
+
+    if ((SDL_WasInit(SDL_INIT_VIDEO) & SDL_INIT_VIDEO) == 0)
+    {
+      if (!SDL_Init(SDL_INIT_VIDEO))
+      {
+        m_error = SDL_GetError();
+        return;
+      }
+      g_sdldmdOwnsVideoSubsystem = true;
+      m_managesSDLVideo = true;
+    }
+
+    ++g_sdldmdInstanceCount;
+    m_registeredSDLInstance = true;
+  }
+
   m_pWindow = SDL_CreateWindow(title, windowWidth, windowHeight, windowFlags);
   if (!m_pWindow)
   {
@@ -49,6 +164,24 @@ SDLDMD::SDLDMD(const char* title, uint16_t windowWidth, uint16_t windowHeight, u
     m_pWindow = nullptr;
     m_pRenderer = nullptr;
     return;
+  }
+
+  int resolvedWindowX = windowX;
+  int resolvedWindowY = windowY;
+  if (!ResolveWindowPositionForScreen(screenIndex, windowX, windowY, &resolvedWindowX, &resolvedWindowY))
+  {
+    m_error = SDL_GetError();
+    SDL_DestroyWindow(m_pWindow);
+    m_pWindow = nullptr;
+    m_pRenderer = nullptr;
+    return;
+  }
+
+  const bool hasExplicitWindowPosition =
+      screenIndex >= 0 || windowX != SDL_WINDOWPOS_UNDEFINED || windowY != SDL_WINDOWPOS_UNDEFINED;
+  if (hasExplicitWindowPosition)
+  {
+    SDL_SetWindowPosition(m_pWindow, resolvedWindowX, resolvedWindowY);
   }
 
   if (!CreateRendererWithFallbacks())
@@ -59,7 +192,10 @@ SDLDMD::SDLDMD(const char* title, uint16_t windowWidth, uint16_t windowHeight, u
     return;
   }
 
-  SDL_SetWindowPosition(m_pWindow, 0, 0);
+  if (!hasExplicitWindowPosition)
+  {
+    SDL_SetWindowPosition(m_pWindow, 0, 0);
+  }
   while (!SDL_SyncWindow(m_pWindow));
 }
 
@@ -69,12 +205,29 @@ SDLDMD::~SDLDMD()
   if (m_pWindow) SDL_DestroyWindow(m_pWindow);
   m_pRenderer = nullptr;
   m_pWindow = nullptr;
+
+  std::lock_guard<std::mutex> lock(g_sdldmdSdlMutex);
+  if (m_registeredSDLInstance)
+  {
+    --g_sdldmdInstanceCount;
+    m_registeredSDLInstance = false;
+  }
+  if (m_managesSDLVideo && g_sdldmdOwnsVideoSubsystem && g_sdldmdInstanceCount == 0)
+  {
+    SDL_QuitSubSystem(SDL_INIT_VIDEO);
+    g_sdldmdOwnsVideoSubsystem = false;
+    m_managesSDLVideo = false;
+  }
 }
 
 SDLDMD* CreateSDLDMD(DMD& dmd, const char* title, uint16_t windowWidth, uint16_t windowHeight, uint32_t windowFlags,
-                     uint16_t width, uint16_t height)
+                     uint16_t width, uint16_t height, int screenIndex, int windowX, int windowY,
+                     SDLDMD::RenderingMode renderingMode,
+                     const char* preferredVideoDriver)
 {
-  SDLDMD* const pSDLDMD = new SDLDMD(title, windowWidth, windowHeight, windowFlags, width, height);
+  SDLDMD* const pSDLDMD =
+      new SDLDMD(title, windowWidth, windowHeight, windowFlags, width, height, screenIndex, windowX, windowY, renderingMode,
+                 preferredVideoDriver);
   if (!pSDLDMD->IsReady())
   {
     SDL_SetError("%s", pSDLDMD->GetError() ? pSDLDMD->GetError() : "Unknown SDL DMD error");
@@ -86,7 +239,79 @@ SDLDMD* CreateSDLDMD(DMD& dmd, const char* title, uint16_t windowWidth, uint16_t
   return pSDLDMD;
 }
 
+SDLDMDConfig* InstallSDLDMDConfig()
+{
+  if (SDLDMDConfig* const pConfig = GetInstalledSDLDMDConfig())
+  {
+    return pConfig;
+  }
+
+  SDLDMDConfig* const pConfig = new SDLDMDConfig();
+  Config::SetInstance(pConfig);
+  return pConfig;
+}
+
+SDLDMD* CreateSDLDMDFromConfig(DMD& dmd, const char* title, uint16_t width, uint16_t height, uint32_t windowFlags,
+                               const char* preferredVideoDriver)
+{
+  SDL_ClearError();
+  SDLDMDConfig* const pConfig = GetInstalledSDLDMDConfig();
+  if (pConfig == nullptr || !pConfig->IsLCDDMDEnabled())
+  {
+    return nullptr;
+  }
+
+  if (pConfig->GetLCDDMDWidth() <= 0 || pConfig->GetLCDDMDHeight() <= 0)
+  {
+    SDL_SetError("Invalid LCD-DMD size %dx%d", pConfig->GetLCDDMDWidth(), pConfig->GetLCDDMDHeight());
+    return nullptr;
+  }
+
+  SDLDMD::RenderingMode renderingMode = SDLDMD::RenderingMode::Dots;
+  if (!ParseSDLDMDRenderingMode(pConfig->GetLCDDMDRenderer(), &renderingMode))
+  {
+    SDL_SetError("Unsupported LCD-DMD renderer '%s'", pConfig->GetLCDDMDRenderer());
+    return nullptr;
+  }
+
+  return CreateSDLDMD(dmd, title, static_cast<uint16_t>(pConfig->GetLCDDMDWidth()),
+                      static_cast<uint16_t>(pConfig->GetLCDDMDHeight()), windowFlags, width, height,
+                      pConfig->GetLCDDMDScreen(),
+                      pConfig->GetLCDDMDX(), pConfig->GetLCDDMDY(), renderingMode, preferredVideoDriver);
+}
+
 bool DestroySDLDMD(DMD& dmd, SDLDMD* pSDLDMD) { return dmd.DestroyRGB24DMD(pSDLDMD); }
+
+bool SetSDLDMDRenderingMode(SDLDMD* pSDLDMD, SDLDMD::RenderingMode renderingMode)
+{
+  if (pSDLDMD == nullptr) return false;
+  pSDLDMD->SetRenderingMode(renderingMode);
+  return true;
+}
+
+bool ParseSDLDMDRenderingMode(const char* value, SDLDMD::RenderingMode* pRenderingMode)
+{
+  if (value == nullptr || pRenderingMode == nullptr) return false;
+
+  const std::string renderer = ToLower(value);
+  if (renderer == "dots")
+  {
+    *pRenderingMode = SDLDMD::RenderingMode::Dots;
+    return true;
+  }
+  if (renderer == "smooth" || renderer == "smoothscaling" || renderer == "smooth-scaling")
+  {
+    *pRenderingMode = SDLDMD::RenderingMode::SmoothScaling;
+    return true;
+  }
+  if (renderer == "xbrz")
+  {
+    *pRenderingMode = SDLDMD::RenderingMode::XBRZ;
+    return true;
+  }
+
+  return false;
+}
 
 void SDLDMD::Update(uint8_t* pData, uint16_t width, uint16_t height)
 {

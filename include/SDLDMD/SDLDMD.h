@@ -18,6 +18,8 @@
 #include "DMDUtil/DMD.h"
 #include "DMDUtil/RGB24DMD.h"
 
+#include "SDLDMD/SDLDMDConfig.h"
+
 namespace DMDUtil
 {
 
@@ -32,7 +34,9 @@ class SDLDMD : public RGB24DMD
   };
 
   SDLDMD(const char* title, uint16_t windowWidth, uint16_t windowHeight, uint32_t windowFlags, uint16_t width,
-         uint16_t height);
+         uint16_t height, int screenIndex = -1, int windowX = SDL_WINDOWPOS_UNDEFINED,
+         int windowY = SDL_WINDOWPOS_UNDEFINED,
+         RenderingMode renderingMode = RenderingMode::Dots, const char* preferredVideoDriver = nullptr);
 
   ~SDLDMD() override;
 
@@ -50,6 +54,8 @@ class SDLDMD : public RGB24DMD
   std::string m_error;
   std::string m_rendererName;
   int m_renderingMode = RenderingMode::Dots;
+  bool m_managesSDLVideo = false;
+  bool m_registeredSDLInstance = false;
 
   bool CreateRendererWithFallbacks();
   void RenderDots(uint8_t* pData, uint16_t width, uint16_t height);
@@ -58,7 +64,17 @@ class SDLDMD : public RGB24DMD
 };
 
 SDLDMDAPI SDLDMD* CreateSDLDMD(DMD& dmd, const char* title, uint16_t windowWidth, uint16_t windowHeight,
-                               uint32_t windowFlags, uint16_t width, uint16_t height);
+                               uint32_t windowFlags, uint16_t width, uint16_t height,
+                               int screenIndex = -1, int windowX = SDL_WINDOWPOS_UNDEFINED,
+                               int windowY = SDL_WINDOWPOS_UNDEFINED,
+                               SDLDMD::RenderingMode renderingMode = SDLDMD::RenderingMode::Dots,
+                               const char* preferredVideoDriver = nullptr);
+SDLDMDAPI SDLDMDConfig* InstallSDLDMDConfig();
+SDLDMDAPI SDLDMD* CreateSDLDMDFromConfig(DMD& dmd, const char* title, uint16_t width = 128, uint16_t height = 32,
+                                         uint32_t windowFlags = 0,
+                                         const char* preferredVideoDriver = nullptr);
 SDLDMDAPI bool DestroySDLDMD(DMD& dmd, SDLDMD* pSDLDMD);
+SDLDMDAPI bool SetSDLDMDRenderingMode(SDLDMD* pSDLDMD, SDLDMD::RenderingMode renderingMode);
+SDLDMDAPI bool ParseSDLDMDRenderingMode(const char* value, SDLDMD::RenderingMode* pRenderingMode);
 
 }  // namespace DMDUtil
