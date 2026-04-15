@@ -74,14 +74,6 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_VISIBILITY_PRESET hidden)
 set(CMAKE_C_VISIBILITY_PRESET hidden)
 
-if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third-party/include/DMDUtil/RGB24DMD.h")
-   message(FATAL_ERROR "Could not find staged DMDUtil headers in third-party/include/DMDUtil.")
-endif()
-
-if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third-party/include/SDL3/SDL.h")
-   message(FATAL_ERROR "Could not find staged SDL3 headers in third-party/include/SDL3. Run the platform external script first.")
-endif()
-
 set(SDLDMD_SOURCES
    src/SDLDMD.cpp
    src/xbrz/xbrz.cpp
@@ -89,37 +81,107 @@ set(SDLDMD_SOURCES
 
 set(SDLDMD_INCLUDE_DIRS
    ${CMAKE_CURRENT_SOURCE_DIR}/include
-   ${CMAKE_CURRENT_SOURCE_DIR}/third-party/include
 )
 
+set(SDLDMD_STAGED_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third-party/include")
+set(SDLDMD_STAGED_BUILD_LIB_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third-party/build-libs/${PLATFORM}/${ARCH}")
+set(SDLDMD_STAGED_RUNTIME_LIB_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third-party/runtime-libs/${PLATFORM}/${ARCH}")
+
+set(SDLDMD_SEARCH_INCLUDE_DIRS "")
+if(EXISTS "${SDLDMD_STAGED_INCLUDE_DIR}/DMDUtil/RGB24DMD.h")
+   list(APPEND SDLDMD_SEARCH_INCLUDE_DIRS "${SDLDMD_STAGED_INCLUDE_DIR}")
+endif()
+
+set(SDLDMD_SEARCH_LIBRARY_DIRS "")
+if(EXISTS "${SDLDMD_STAGED_BUILD_LIB_DIR}" OR EXISTS "${SDLDMD_STAGED_RUNTIME_LIB_DIR}")
+   list(APPEND SDLDMD_SEARCH_LIBRARY_DIRS
+      "${SDLDMD_STAGED_BUILD_LIB_DIR}"
+      "${SDLDMD_STAGED_RUNTIME_LIB_DIR}"
+   )
+endif()
+
+find_path(SDLDMD_DMDUTIL_INCLUDE_DIR
+   NAMES DMDUtil/RGB24DMD.h
+   PATHS ${SDLDMD_SEARCH_INCLUDE_DIRS}
+)
+find_path(SDLDMD_SDL3_INCLUDE_DIR
+   NAMES SDL3/SDL.h
+   PATHS ${SDLDMD_SEARCH_INCLUDE_DIRS}
+)
+
+if(NOT SDLDMD_DMDUTIL_INCLUDE_DIR)
+   find_path(SDLDMD_DMDUTIL_INCLUDE_DIR NAMES DMDUtil/RGB24DMD.h)
+endif()
+
+if(NOT SDLDMD_SDL3_INCLUDE_DIR)
+   find_path(SDLDMD_SDL3_INCLUDE_DIR NAMES SDL3/SDL.h)
+endif()
+
+if(NOT SDLDMD_DMDUTIL_INCLUDE_DIR)
+   message(FATAL_ERROR "Could not find DMDUtil headers (expected DMDUtil/RGB24DMD.h).")
+endif()
+
+if(NOT SDLDMD_SDL3_INCLUDE_DIR)
+   message(FATAL_ERROR "Could not find SDL3 headers (expected SDL3/SDL.h).")
+endif()
+
+list(APPEND SDLDMD_INCLUDE_DIRS
+   ${SDLDMD_DMDUTIL_INCLUDE_DIR}
+   ${SDLDMD_SDL3_INCLUDE_DIR}
+)
+
+if(PLATFORM STREQUAL "win" AND ARCH STREQUAL "x64")
+   set(SDLDMD_DMDUTIL_LIBRARY_NAMES dmdutil64)
+   set(SDLDMD_SDL3_LIBRARY_NAMES SDL364)
+elseif(PLATFORM STREQUAL "win")
+   set(SDLDMD_DMDUTIL_LIBRARY_NAMES dmdutil)
+   set(SDLDMD_SDL3_LIBRARY_NAMES SDL3)
+elseif(PLATFORM STREQUAL "win-mingw")
+   set(SDLDMD_DMDUTIL_LIBRARY_NAMES dmdutil64)
+   set(SDLDMD_SDL3_LIBRARY_NAMES SDL364)
+else()
+   set(SDLDMD_DMDUTIL_LIBRARY_NAMES dmdutil)
+   set(SDLDMD_SDL3_LIBRARY_NAMES SDL3)
+endif()
+
+find_library(SDLDMD_DMDUTIL_LIBRARY
+   NAMES ${SDLDMD_DMDUTIL_LIBRARY_NAMES}
+   PATHS ${SDLDMD_SEARCH_LIBRARY_DIRS}
+)
+find_library(SDLDMD_SDL3_LIBRARY
+   NAMES ${SDLDMD_SDL3_LIBRARY_NAMES}
+   PATHS ${SDLDMD_SEARCH_LIBRARY_DIRS}
+)
+
+if(NOT SDLDMD_DMDUTIL_LIBRARY)
+   find_library(SDLDMD_DMDUTIL_LIBRARY NAMES ${SDLDMD_DMDUTIL_LIBRARY_NAMES})
+endif()
+
+if(NOT SDLDMD_SDL3_LIBRARY)
+   find_library(SDLDMD_SDL3_LIBRARY NAMES ${SDLDMD_SDL3_LIBRARY_NAMES})
+endif()
+
+if(NOT SDLDMD_DMDUTIL_LIBRARY)
+   message(FATAL_ERROR "Could not find DMDUtil library. Looked for: ${SDLDMD_DMDUTIL_LIBRARY_NAMES}")
+endif()
+
+if(NOT SDLDMD_SDL3_LIBRARY)
+   message(FATAL_ERROR "Could not find SDL3 library. Looked for: ${SDLDMD_SDL3_LIBRARY_NAMES}")
+endif()
+
+message(STATUS "DMDUtil include dir: ${SDLDMD_DMDUTIL_INCLUDE_DIR}")
+message(STATUS "SDL3 include dir: ${SDLDMD_SDL3_INCLUDE_DIR}")
+message(STATUS "DMDUtil library: ${SDLDMD_DMDUTIL_LIBRARY}")
+message(STATUS "SDL3 library: ${SDLDMD_SDL3_LIBRARY}")
+
 function(sdldmd_apply_link_settings target_name)
-   if(PLATFORM STREQUAL "win")
-      target_link_directories(${target_name} PUBLIC
-         third-party/build-libs/${PLATFORM}/${ARCH}
-         third-party/runtime-libs/${PLATFORM}/${ARCH}
-      )
-      if(ARCH STREQUAL "x64")
-         target_link_libraries(${target_name} PUBLIC dmdutil64 SDL364)
-      else()
-         target_link_libraries(${target_name} PUBLIC dmdutil SDL3)
-      endif()
-   elseif(PLATFORM STREQUAL "win-mingw")
-      target_link_directories(${target_name} PUBLIC
-         third-party/build-libs/${PLATFORM}/${ARCH}
-         third-party/runtime-libs/${PLATFORM}/${ARCH}
-      )
-      target_link_libraries(${target_name} PUBLIC dmdutil64 SDL364)
-   elseif(PLATFORM STREQUAL "macos" OR PLATFORM STREQUAL "linux" OR PLATFORM STREQUAL "android")
-      target_link_directories(${target_name} PUBLIC
-         third-party/runtime-libs/${PLATFORM}/${ARCH}
-      )
-      target_link_libraries(${target_name} PUBLIC dmdutil SDL3)
-   elseif(PLATFORM STREQUAL "ios" OR PLATFORM STREQUAL "ios-simulator" OR PLATFORM STREQUAL "tvos")
-      target_link_directories(${target_name} PUBLIC
-         third-party/build-libs/${PLATFORM}/${ARCH}
-      )
-      target_link_libraries(${target_name} PUBLIC dmdutil SDL3)
+   if(SDLDMD_SEARCH_LIBRARY_DIRS)
+      target_link_directories(${target_name} PUBLIC ${SDLDMD_SEARCH_LIBRARY_DIRS})
    endif()
+   target_link_libraries(${target_name} PUBLIC
+      ${SDLDMD_DMDUTIL_LIBRARY}
+      ${SDLDMD_SDL3_LIBRARY}
+   )
 endfunction()
 
 if(BUILD_SHARED)
