@@ -50,6 +50,8 @@ cmake \
    -DCMAKE_SYSTEM_NAME=Android \
    -DCMAKE_SYSTEM_VERSION=30 \
    -DCMAKE_ANDROID_ARCH_ABI=arm64-v8a \
+   -DANDROID_PLATFORM=android-30 \
+   -DANDROID_ABI=arm64-v8a \
    -DCMAKE_BUILD_TYPE=${BUILD_TYPE} \
    -B build
 cmake --build build -- -j${NUM_PROCS}
