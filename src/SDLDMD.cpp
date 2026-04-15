@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdlib>
 #include <mutex>
 #include <vector>
 
@@ -22,6 +23,17 @@ std::string ToLower(std::string value)
     return static_cast<char>(std::tolower(c));
   });
   return value;
+}
+
+bool SetEnvIfUnset(const char* name, const char* value)
+{
+  if (name == nullptr || value == nullptr) return false;
+  if (std::getenv(name) != nullptr) return true;
+#if defined(_WIN32) || defined(_WIN64)
+  return _putenv_s(name, value) == 0;
+#else
+  return setenv(name, value, 0) == 0;
+#endif
 }
 
 const char* GetDefaultVideoDriver(const char* preferredVideoDriver)
@@ -139,7 +151,7 @@ SDLDMD::SDLDMD(const char* title, uint16_t windowWidth, uint16_t windowHeight, u
     const char* const videoDriver = GetDefaultVideoDriver(preferredVideoDriver);
     if (videoDriver && *videoDriver && SDL_getenv("SDL_VIDEODRIVER") == nullptr)
     {
-      SDL_setenv("SDL_VIDEODRIVER", videoDriver, 0);
+      SetEnvIfUnset("SDL_VIDEODRIVER", videoDriver);
     }
 
     if ((SDL_WasInit(SDL_INIT_VIDEO) & SDL_INIT_VIDEO) == 0)
