@@ -84,6 +84,9 @@ jobs:
             libxss-dev libxtst-dev libxinerama-dev libxxf86vm-dev libwayland-dev libxkbcommon-dev \
             libdrm-dev libgbm-dev libegl1-mesa-dev libgl1-mesa-dev libgles2-mesa-dev \
             libdbus-1-dev libudev-dev libibus-1.0-dev
+      - if: (matrix.platform == 'linux' && matrix.arch == 'aarch64')
+        run: |
+          sudo apt-get install -y libgpiod-dev
       - if: (matrix.platform == 'win')
         name: Build (win)
         run: |

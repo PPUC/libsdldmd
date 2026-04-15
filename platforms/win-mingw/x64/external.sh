@@ -47,7 +47,7 @@ cmake \
 cmake --build build -- -j${NUM_PROCS}
 cd ..
 
-cp SDL/build/SDL364.dll.a ../third-party/build-libs/win-mingw/x64/
+cp SDL/build/libSDL364.dll.a ../third-party/build-libs/win-mingw/x64/
 cp SDL/build/SDL364.dll ../third-party/runtime-libs/win-mingw/x64/
 cp -r SDL/include/SDL3 ../third-party/include/
 
