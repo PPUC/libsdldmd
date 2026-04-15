@@ -27,6 +27,10 @@ mv libdmdutil-${LIBDMDUTIL_SHA} libdmdutil
 cd libdmdutil
 BUILD_TYPE=${BUILD_TYPE} platforms/android/arm64-v8a/external.sh
 cmake \
+   -DCMAKE_TOOLCHAIN_FILE="${ANDROID_NDK_LATEST_HOME}/build/cmake/android.toolchain.cmake" \
+   -DCMAKE_SYSTEM_NAME=Android \
+   -DCMAKE_SYSTEM_VERSION=30 \
+   -DCMAKE_ANDROID_ARCH_ABI=arm64-v8a \
    -DPLATFORM=android \
    -DARCH=arm64-v8a \
    -DBUILD_SHARED=ON \
