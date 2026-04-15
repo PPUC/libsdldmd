@@ -17,6 +17,7 @@ curl -sL https://github.com/PPUC/libdmdutil/archive/${LIBDMDUTIL_SHA}.tar.gz -o 
 tar xzf libdmdutil-${LIBDMDUTIL_SHA}.tar.gz
 mv libdmdutil-${LIBDMDUTIL_SHA} libdmdutil
 cd libdmdutil
+BUILD_TYPE=${BUILD_TYPE} platforms/win/x86/external.sh
 cmake \
    -G "Visual Studio 17 2022" \
    -A Win32 \

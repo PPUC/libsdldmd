@@ -19,6 +19,7 @@ curl -sL https://github.com/PPUC/libdmdutil/archive/${LIBDMDUTIL_SHA}.tar.gz -o 
 tar xzf libdmdutil-${LIBDMDUTIL_SHA}.tar.gz
 mv libdmdutil-${LIBDMDUTIL_SHA} libdmdutil
 cd libdmdutil
+BUILD_TYPE=${BUILD_TYPE} platforms/win-mingw/x64/external.sh
 cmake \
    -DCMAKE_BUILD_TYPE=${BUILD_TYPE} \
    -DPLATFORM=win-mingw \

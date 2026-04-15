@@ -10,7 +10,24 @@ message(STATUS "ARCH: ${ARCH}")
 message(STATUS "BUILD_SHARED: ${BUILD_SHARED}")
 message(STATUS "BUILD_STATIC: ${BUILD_STATIC}")
 
-project(libsdldmd LANGUAGES CXX)
+file(READ include/SDLDMD/SDLDMD.h version)
+string(REGEX MATCH "#[ \t]*define[ \t]+SDLDMD_VERSION_MAJOR[ \t]+([0-9]+)" _tmp "${version}")
+if("${CMAKE_MATCH_1}" STREQUAL "")
+   message(FATAL_ERROR "Failed to parse SDLDMD_VERSION_MAJOR from include/SDLDMD/SDLDMD.h")
+endif()
+set(VERSION_MAJOR "${CMAKE_MATCH_1}")
+string(REGEX MATCH "#[ \t]*define[ \t]+SDLDMD_VERSION_MINOR[ \t]+([0-9]+)" _tmp "${version}")
+if("${CMAKE_MATCH_1}" STREQUAL "")
+   message(FATAL_ERROR "Failed to parse SDLDMD_VERSION_MINOR from include/SDLDMD/SDLDMD.h")
+endif()
+set(VERSION_MINOR "${CMAKE_MATCH_1}")
+string(REGEX MATCH "#[ \t]*define[ \t]+SDLDMD_VERSION_PATCH[ \t]+([0-9]+)" _tmp "${version}")
+if("${CMAKE_MATCH_1}" STREQUAL "")
+   message(FATAL_ERROR "Failed to parse SDLDMD_VERSION_PATCH from include/SDLDMD/SDLDMD.h")
+endif()
+set(VERSION_PATCH "${CMAKE_MATCH_1}")
+
+project(libsdldmd VERSION "${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH}" LANGUAGES CXX)
 
 if(PLATFORM STREQUAL "win")
    if(ARCH STREQUAL "x86")
@@ -112,6 +129,7 @@ if(BUILD_SHARED)
    set_target_properties(sdldmd_shared PROPERTIES
       OUTPUT_NAME ${SDLDMD_OUTPUT_NAME}
       POSITION_INDEPENDENT_CODE ON
+      VERSION ${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH}
    )
    if(PLATFORM STREQUAL "win-mingw")
       set_target_properties(sdldmd_shared PROPERTIES

@@ -64,9 +64,9 @@ jobs:
       - if: (matrix.platform == 'win')
         run: |
           if [[ "${{ matrix.arch }}" == "x64" ]]; then
-            /c/msys64/usr/bin/bash.exe -l -c "pacman -S --noconfirm make diffutils mingw-w64-ucrt-x86_64-cmake"
+            /c/msys64/usr/bin/bash.exe -l -c "pacman -S --noconfirm make diffutils mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-libwinpthread mingw-w64-ucrt-x86_64-cmake"
           else
-            /c/msys64/usr/bin/bash.exe -l -c "pacman -S --noconfirm make diffutils mingw-w64-i686-cmake"
+            /c/msys64/usr/bin/bash.exe -l -c "pacman -S --noconfirm make diffutils mingw-w64-i686-gcc mingw-w64-i686-libwinpthread mingw-w64-i686-cmake"
           fi
       - if: (matrix.platform == 'win-mingw')
         run: |
