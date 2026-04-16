@@ -316,6 +316,36 @@ bool ParseSDLDMDRenderingMode(const char* value, SDLDMD::RenderingMode* pRenderi
     *pRenderingMode = SDLDMD::RenderingMode::Square;
     return true;
   }
+  if (renderer == "scale2x")
+  {
+    *pRenderingMode = SDLDMD::RenderingMode::Scale2x;
+    return true;
+  }
+  if (renderer == "scale4x")
+  {
+    *pRenderingMode = SDLDMD::RenderingMode::Scale4x;
+    return true;
+  }
+  if (renderer == "scale2x-dots" || renderer == "scale2xdots")
+  {
+    *pRenderingMode = SDLDMD::RenderingMode::Scale2xDots;
+    return true;
+  }
+  if (renderer == "scale4x-dots" || renderer == "scale4xdots")
+  {
+    *pRenderingMode = SDLDMD::RenderingMode::Scale4xDots;
+    return true;
+  }
+  if (renderer == "scale2x-squares" || renderer == "scale2xsquares")
+  {
+    *pRenderingMode = SDLDMD::RenderingMode::Scale2xSquares;
+    return true;
+  }
+  if (renderer == "scale4x-squares" || renderer == "scale4xsquares")
+  {
+    *pRenderingMode = SDLDMD::RenderingMode::Scale4xSquares;
+    return true;
+  }
   if (renderer == "smooth" || renderer == "smoothscaling" || renderer == "smooth-scaling")
   {
     *pRenderingMode = SDLDMD::RenderingMode::SmoothScaling;
@@ -339,6 +369,30 @@ void SDLDMD::Update(uint8_t* pData, uint16_t width, uint16_t height)
   {
     case RenderingMode::Square:
       RenderSquares(m_pData, m_width, m_height);
+      break;
+
+    case RenderingMode::Scale2x:
+      RenderScaledNearest(m_pData, m_width, m_height, 2);
+      break;
+
+    case RenderingMode::Scale4x:
+      RenderScaledNearest(m_pData, m_width, m_height, 4);
+      break;
+
+    case RenderingMode::Scale2xDots:
+      RenderScaledDots(m_pData, m_width, m_height, 2);
+      break;
+
+    case RenderingMode::Scale4xDots:
+      RenderScaledDots(m_pData, m_width, m_height, 4);
+      break;
+
+    case RenderingMode::Scale2xSquares:
+      RenderScaledSquares(m_pData, m_width, m_height, 2);
+      break;
+
+    case RenderingMode::Scale4xSquares:
+      RenderScaledSquares(m_pData, m_width, m_height, 4);
       break;
 
     case RenderingMode::SmoothScaling:
@@ -404,6 +458,64 @@ void SDLDMD::RenderDots(uint8_t* pData, uint16_t width, uint16_t height)
   SDL_RenderPresent(m_pRenderer);
 }
 
+void SDLDMD::RenderScaledDots(uint8_t* pData, uint16_t width, uint16_t height, int scaleFactor)
+{
+  const uint16_t scaledWidth = static_cast<uint16_t>(width * scaleFactor);
+  const uint16_t scaledHeight = static_cast<uint16_t>(height * scaleFactor);
+  std::vector<uint8_t> scaledBuffer(static_cast<size_t>(scaledWidth) * scaledHeight * 3u);
+
+  for (uint16_t y = 0; y < height; ++y)
+  {
+    for (uint16_t x = 0; x < width; ++x)
+    {
+      const size_t srcIndex = (static_cast<size_t>(y) * width + x) * 3u;
+      for (int dy = 0; dy < scaleFactor; ++dy)
+      {
+        for (int dx = 0; dx < scaleFactor; ++dx)
+        {
+          const uint16_t dstX = static_cast<uint16_t>(x * scaleFactor + dx);
+          const uint16_t dstY = static_cast<uint16_t>(y * scaleFactor + dy);
+          const size_t dstIndex = (static_cast<size_t>(dstY) * scaledWidth + dstX) * 3u;
+          scaledBuffer[dstIndex] = pData[srcIndex];
+          scaledBuffer[dstIndex + 1] = pData[srcIndex + 1];
+          scaledBuffer[dstIndex + 2] = pData[srcIndex + 2];
+        }
+      }
+    }
+  }
+
+  RenderDots(scaledBuffer.data(), scaledWidth, scaledHeight);
+}
+
+void SDLDMD::RenderScaledSquares(uint8_t* pData, uint16_t width, uint16_t height, int scaleFactor)
+{
+  const uint16_t scaledWidth = static_cast<uint16_t>(width * scaleFactor);
+  const uint16_t scaledHeight = static_cast<uint16_t>(height * scaleFactor);
+  std::vector<uint8_t> scaledBuffer(static_cast<size_t>(scaledWidth) * scaledHeight * 3u);
+
+  for (uint16_t y = 0; y < height; ++y)
+  {
+    for (uint16_t x = 0; x < width; ++x)
+    {
+      const size_t srcIndex = (static_cast<size_t>(y) * width + x) * 3u;
+      for (int dy = 0; dy < scaleFactor; ++dy)
+      {
+        for (int dx = 0; dx < scaleFactor; ++dx)
+        {
+          const uint16_t dstX = static_cast<uint16_t>(x * scaleFactor + dx);
+          const uint16_t dstY = static_cast<uint16_t>(y * scaleFactor + dy);
+          const size_t dstIndex = (static_cast<size_t>(dstY) * scaledWidth + dstX) * 3u;
+          scaledBuffer[dstIndex] = pData[srcIndex];
+          scaledBuffer[dstIndex + 1] = pData[srcIndex + 1];
+          scaledBuffer[dstIndex + 2] = pData[srcIndex + 2];
+        }
+      }
+    }
+  }
+
+  RenderSquares(scaledBuffer.data(), scaledWidth, scaledHeight);
+}
+
 void SDLDMD::RenderSquares(uint8_t* pData, uint16_t width, uint16_t height)
 {
   int windowWidth = 0;
@@ -451,6 +563,39 @@ void SDLDMD::RenderSquares(uint8_t* pData, uint16_t width, uint16_t height)
   }
 
   SDL_RenderPresent(m_pRenderer);
+}
+
+void SDLDMD::RenderScaledNearest(uint8_t* pData, uint16_t width, uint16_t height, int scaleFactor)
+{
+  int windowWidth = 0;
+  int windowHeight = 0;
+  SDL_GetRenderOutputSize(m_pRenderer, &windowWidth, &windowHeight);
+
+  SDL_Texture* srcTexture =
+      SDL_CreateTexture(m_pRenderer, SDL_PIXELFORMAT_RGB24, SDL_TEXTUREACCESS_STATIC, width, height);
+  SDL_UpdateTexture(srcTexture, nullptr, pData, width * 3);
+
+  const int intermediateW = width * scaleFactor;
+  const int intermediateH = height * scaleFactor;
+  SDL_Texture* intermediate =
+      SDL_CreateTexture(m_pRenderer, SDL_PIXELFORMAT_RGB24, SDL_TEXTUREACCESS_TARGET, intermediateW, intermediateH);
+
+  SDL_SetRenderTarget(m_pRenderer, intermediate);
+  SDL_SetTextureScaleMode(srcTexture, SDL_SCALEMODE_NEAREST);
+  SDL_SetRenderDrawColor(m_pRenderer, 0, 0, 0, 255);
+  SDL_RenderClear(m_pRenderer);
+  SDL_RenderTexture(m_pRenderer, srcTexture, nullptr, nullptr);
+
+  SDL_SetRenderTarget(m_pRenderer, nullptr);
+  SDL_SetTextureScaleMode(intermediate, SDL_SCALEMODE_NEAREST);
+  SDL_SetRenderDrawColor(m_pRenderer, 0, 0, 0, 255);
+  SDL_RenderClear(m_pRenderer);
+  SDL_FRect dest = {0.0f, 0.0f, static_cast<float>(windowWidth), static_cast<float>(windowHeight)};
+  SDL_RenderTexture(m_pRenderer, intermediate, nullptr, &dest);
+  SDL_RenderPresent(m_pRenderer);
+
+  SDL_DestroyTexture(intermediate);
+  SDL_DestroyTexture(srcTexture);
 }
 
 void SDLDMD::RenderSmoothScaling(uint8_t* pData, uint16_t width, uint16_t height)

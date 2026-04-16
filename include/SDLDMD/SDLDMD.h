@@ -30,8 +30,14 @@ class SDLDMD : public RGB24DMD
   {
     Dots = 0,
     Square = 1,
-    SmoothScaling = 2,
-    XBRZ = 3,
+    Scale2x = 2,
+    Scale4x = 3,
+    Scale2xDots = 4,
+    Scale4xDots = 5,
+    Scale2xSquares = 6,
+    Scale4xSquares = 7,
+    SmoothScaling = 8,
+    XBRZ = 9,
   };
 
   SDLDMD(const char* title, uint16_t windowWidth, uint16_t windowHeight, uint32_t windowFlags, uint16_t width,
@@ -61,6 +67,9 @@ class SDLDMD : public RGB24DMD
   bool CreateRendererWithFallbacks();
   void RenderDots(uint8_t* pData, uint16_t width, uint16_t height);
   void RenderSquares(uint8_t* pData, uint16_t width, uint16_t height);
+  void RenderScaledDots(uint8_t* pData, uint16_t width, uint16_t height, int scaleFactor);
+  void RenderScaledSquares(uint8_t* pData, uint16_t width, uint16_t height, int scaleFactor);
+  void RenderScaledNearest(uint8_t* pData, uint16_t width, uint16_t height, int scaleFactor);
   void RenderSmoothScaling(uint8_t* pData, uint16_t width, uint16_t height);
   void RenderXBRZ(uint8_t* pData, uint16_t width, uint16_t height);
 };
