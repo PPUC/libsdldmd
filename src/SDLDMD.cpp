@@ -311,6 +311,11 @@ bool ParseSDLDMDRenderingMode(const char* value, SDLDMD::RenderingMode* pRenderi
     *pRenderingMode = SDLDMD::RenderingMode::Dots;
     return true;
   }
+  if (renderer == "squares" || renderer == "square")
+  {
+    *pRenderingMode = SDLDMD::RenderingMode::Square;
+    return true;
+  }
   if (renderer == "smooth" || renderer == "smoothscaling" || renderer == "smooth-scaling")
   {
     *pRenderingMode = SDLDMD::RenderingMode::SmoothScaling;
@@ -332,6 +337,10 @@ void SDLDMD::Update(uint8_t* pData, uint16_t width, uint16_t height)
 
   switch (m_renderingMode)
   {
+    case RenderingMode::Square:
+      RenderSquares(m_pData, m_width, m_height);
+      break;
+
     case RenderingMode::SmoothScaling:
       RenderSmoothScaling(m_pData, m_width, m_height);
       break;
@@ -389,6 +398,55 @@ void SDLDMD::RenderDots(uint8_t* pData, uint16_t width, uint16_t height)
           }
         }
       }
+    }
+  }
+
+  SDL_RenderPresent(m_pRenderer);
+}
+
+void SDLDMD::RenderSquares(uint8_t* pData, uint16_t width, uint16_t height)
+{
+  int windowWidth = 0;
+  int windowHeight = 0;
+  SDL_GetRenderOutputSize(m_pRenderer, &windowWidth, &windowHeight);
+
+  const float pixelWidth = static_cast<float>(windowWidth) / width;
+  const float pixelHeight = static_cast<float>(windowHeight) / height;
+
+  SDL_SetRenderDrawColor(m_pRenderer, 0, 0, 0, 255);
+  SDL_RenderClear(m_pRenderer);
+
+  for (int y = 0; y < height; ++y)
+  {
+    for (int x = 0; x < width; ++x)
+    {
+      const int idx = (y * width + x) * 3;
+      const uint8_t r = pData[idx];
+      const uint8_t g = pData[idx + 1];
+      const uint8_t b = pData[idx + 2];
+
+      if (r == 0 && g == 0 && b == 0) continue;
+
+      SDL_SetRenderDrawColor(m_pRenderer, r, g, b, 255);
+
+      SDL_FRect rect = {
+          x * pixelWidth,
+          y * pixelHeight,
+          pixelWidth,
+          pixelHeight,
+      };
+
+      // Keep a 1px black border between adjacent pixels.
+      if (rect.w > 1.0f)
+      {
+        rect.w -= 1.0f;
+      }
+      if (rect.h > 1.0f)
+      {
+        rect.h -= 1.0f;
+      }
+
+      SDL_RenderFillRect(m_pRenderer, &rect);
     }
   }
 

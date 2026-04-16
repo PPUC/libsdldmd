@@ -29,8 +29,9 @@ class SDLDMD : public RGB24DMD
   enum RenderingMode : int
   {
     Dots = 0,
-    SmoothScaling = 1,
-    XBRZ = 2,
+    Square = 1,
+    SmoothScaling = 2,
+    XBRZ = 3,
   };
 
   SDLDMD(const char* title, uint16_t windowWidth, uint16_t windowHeight, uint32_t windowFlags, uint16_t width,
@@ -59,6 +60,7 @@ class SDLDMD : public RGB24DMD
 
   bool CreateRendererWithFallbacks();
   void RenderDots(uint8_t* pData, uint16_t width, uint16_t height);
+  void RenderSquares(uint8_t* pData, uint16_t width, uint16_t height);
   void RenderSmoothScaling(uint8_t* pData, uint16_t width, uint16_t height);
   void RenderXBRZ(uint8_t* pData, uint16_t width, uint16_t height);
 };
