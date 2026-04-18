@@ -66,6 +66,8 @@ class SDLDMD : public RGB24DMD
   bool m_loggedFirstFrame = false;
 
   bool CreateRendererWithFallbacks();
+  bool UseTextureRendererFallback() const;
+  void RenderTextureNearest(uint8_t* pData, uint16_t width, uint16_t height);
   void RenderDots(uint8_t* pData, uint16_t width, uint16_t height);
   void RenderSquares(uint8_t* pData, uint16_t width, uint16_t height);
   void RenderScaledDots(uint8_t* pData, uint16_t width, uint16_t height, int scaleFactor);

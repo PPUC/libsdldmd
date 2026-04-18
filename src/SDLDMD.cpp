@@ -183,6 +183,16 @@ bool SDLDMD::CreateRendererWithFallbacks()
   return false;
 }
 
+bool SDLDMD::UseTextureRendererFallback() const
+{
+#if defined(__linux__) && !defined(__ANDROID__)
+  const char* const videoDriver = SDL_GetCurrentVideoDriver();
+  return videoDriver != nullptr && std::strcmp(videoDriver, "kmsdrm") == 0;
+#else
+  return false;
+#endif
+}
+
 SDLDMD::SDLDMD(const char* title, uint16_t windowWidth, uint16_t windowHeight, uint32_t windowFlags, uint16_t width,
                uint16_t height, int screenIndex, int windowX, int windowY, RenderingMode renderingMode,
                const char* preferredVideoDriver)
@@ -515,6 +525,12 @@ void SDLDMD::Update(uint8_t* pData, uint16_t width, uint16_t height)
 
 void SDLDMD::RenderDots(uint8_t* pData, uint16_t width, uint16_t height)
 {
+  if (UseTextureRendererFallback())
+  {
+    RenderTextureNearest(pData, width, height);
+    return;
+  }
+
   int windowWidth = 0;
   int windowHeight = 0;
   SDL_GetRenderOutputSize(m_pRenderer, &windowWidth, &windowHeight);
@@ -560,6 +576,32 @@ void SDLDMD::RenderDots(uint8_t* pData, uint16_t width, uint16_t height)
   }
 
   SDL_RenderPresent(m_pRenderer);
+}
+
+void SDLDMD::RenderTextureNearest(uint8_t* pData, uint16_t width, uint16_t height)
+{
+  int windowWidth = 0;
+  int windowHeight = 0;
+  SDL_GetRenderOutputSize(m_pRenderer, &windowWidth, &windowHeight);
+
+  SDL_Texture* texture =
+      SDL_CreateTexture(m_pRenderer, SDL_PIXELFORMAT_RGB24, SDL_TEXTUREACCESS_STATIC, width, height);
+  if (texture == nullptr)
+  {
+    return;
+  }
+
+  SDL_UpdateTexture(texture, nullptr, pData, width * 3);
+  SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_NEAREST);
+
+  SDL_SetRenderDrawColor(m_pRenderer, 0, 0, 0, 255);
+  SDL_RenderClear(m_pRenderer);
+
+  SDL_FRect dest = {0.0f, 0.0f, static_cast<float>(windowWidth), static_cast<float>(windowHeight)};
+  SDL_RenderTexture(m_pRenderer, texture, nullptr, &dest);
+  SDL_RenderPresent(m_pRenderer);
+
+  SDL_DestroyTexture(texture);
 }
 
 void SDLDMD::RenderScaledDots(uint8_t* pData, uint16_t width, uint16_t height, int scaleFactor)
@@ -622,6 +664,12 @@ void SDLDMD::RenderScaledSquares(uint8_t* pData, uint16_t width, uint16_t height
 
 void SDLDMD::RenderSquares(uint8_t* pData, uint16_t width, uint16_t height)
 {
+  if (UseTextureRendererFallback())
+  {
+    RenderTextureNearest(pData, width, height);
+    return;
+  }
+
   int windowWidth = 0;
   int windowHeight = 0;
   SDL_GetRenderOutputSize(m_pRenderer, &windowWidth, &windowHeight);
