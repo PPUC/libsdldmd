@@ -149,6 +149,85 @@ bool ResolveWindowPositionForScreen(int screenIndex, int windowX, int windowY, i
   *pResolvedY = displayBounds.y + relativeY;
   return true;
 }
+
+void LogDisplaySetup(SDL_Window* pWindow, SDL_Renderer* pRenderer, int requestedScreenIndex)
+{
+  int numDisplays = 0;
+  SDL_DisplayID* pDisplays = SDL_GetDisplays(&numDisplays);
+  if (pDisplays != nullptr)
+  {
+    Log(DMDUtil_LogLevel_INFO, "SDLDMD displays detected: count=%d requestedScreen=%d", numDisplays, requestedScreenIndex);
+    for (int i = 0; i < numDisplays; ++i)
+    {
+      SDL_Rect displayBounds;
+      const bool hasBounds = SDL_GetDisplayBounds(pDisplays[i], &displayBounds);
+
+      SDL_DisplayMode mode;
+      const bool hasMode = SDL_GetCurrentDisplayMode(pDisplays[i], &mode);
+
+      Log(DMDUtil_LogLevel_INFO,
+          "SDLDMD display[%d]: id=%u bounds=%dx%d+%d+%d mode=%dx%d@%.2f",
+          i,
+          static_cast<unsigned int>(pDisplays[i]),
+          hasBounds ? displayBounds.w : -1,
+          hasBounds ? displayBounds.h : -1,
+          hasBounds ? displayBounds.x : -1,
+          hasBounds ? displayBounds.y : -1,
+          hasMode ? mode.w : -1,
+          hasMode ? mode.h : -1,
+          hasMode ? static_cast<double>(mode.refresh_rate) : -1.0);
+    }
+    SDL_free(pDisplays);
+  }
+  else if (const char* const error = SDL_GetError(); error && *error)
+  {
+    Log(DMDUtil_LogLevel_INFO, "SDLDMD displays query failed: %s", error);
+  }
+
+  if (pWindow != nullptr)
+  {
+    int windowWidth = 0;
+    int windowHeight = 0;
+    SDL_GetWindowSizeInPixels(pWindow, &windowWidth, &windowHeight);
+    Log(DMDUtil_LogLevel_INFO, "SDLDMD window pixels: %dx%d", windowWidth, windowHeight);
+  }
+
+  if (pRenderer != nullptr)
+  {
+    int outputWidth = 0;
+    int outputHeight = 0;
+    SDL_GetRenderOutputSize(pRenderer, &outputWidth, &outputHeight);
+    Log(DMDUtil_LogLevel_INFO, "SDLDMD render output: %dx%d", outputWidth, outputHeight);
+  }
+}
+
+bool SyncWindowAndWaitUntilShown(SDL_Window* pWindow)
+{
+  if (pWindow == nullptr)
+  {
+    return false;
+  }
+
+  const Uint64 deadline = SDL_GetTicks() + 3000;
+  while (SDL_GetTicks() < deadline)
+  {
+    if (SDL_SyncWindow(pWindow))
+    {
+      return true;
+    }
+    SDL_Delay(10);
+  }
+
+  if (const char* const error = SDL_GetError(); error && *error)
+  {
+    Log(DMDUtil_LogLevel_INFO, "SDLDMD window sync timed out: %s", error);
+  }
+  else
+  {
+    Log(DMDUtil_LogLevel_INFO, "SDLDMD window sync timed out without SDL error");
+  }
+  return false;
+}
 }  // namespace
 
 bool SDLDMD::CreateRendererWithFallbacks()
@@ -181,16 +260,6 @@ bool SDLDMD::CreateRendererWithFallbacks()
 
   m_error = lastError.empty() ? "SDL couldn't create a renderer." : lastError;
   return false;
-}
-
-bool SDLDMD::UseTextureRendererFallback() const
-{
-#if defined(__linux__) && !defined(__ANDROID__)
-  const char* const videoDriver = SDL_GetCurrentVideoDriver();
-  return videoDriver != nullptr && std::strcmp(videoDriver, "kmsdrm") == 0;
-#else
-  return false;
-#endif
 }
 
 SDLDMD::SDLDMD(const char* title, uint16_t windowWidth, uint16_t windowHeight, uint32_t windowFlags, uint16_t width,
@@ -267,7 +336,11 @@ SDLDMD::SDLDMD(const char* title, uint16_t windowWidth, uint16_t windowHeight, u
   {
     SDL_SetWindowPosition(m_pWindow, 0, 0);
   }
-  while (!SDL_SyncWindow(m_pWindow));
+  if (!SyncWindowAndWaitUntilShown(m_pWindow))
+  {
+    Log(DMDUtil_LogLevel_INFO, "SDLDMD continuing after incomplete window sync");
+  }
+  LogDisplaySetup(m_pWindow, m_pRenderer, screenIndex);
 }
 
 SDLDMD::~SDLDMD()
@@ -525,12 +598,6 @@ void SDLDMD::Update(uint8_t* pData, uint16_t width, uint16_t height)
 
 void SDLDMD::RenderDots(uint8_t* pData, uint16_t width, uint16_t height)
 {
-  if (UseTextureRendererFallback())
-  {
-    RenderTextureNearest(pData, width, height);
-    return;
-  }
-
   int windowWidth = 0;
   int windowHeight = 0;
   SDL_GetRenderOutputSize(m_pRenderer, &windowWidth, &windowHeight);
@@ -576,32 +643,6 @@ void SDLDMD::RenderDots(uint8_t* pData, uint16_t width, uint16_t height)
   }
 
   SDL_RenderPresent(m_pRenderer);
-}
-
-void SDLDMD::RenderTextureNearest(uint8_t* pData, uint16_t width, uint16_t height)
-{
-  int windowWidth = 0;
-  int windowHeight = 0;
-  SDL_GetRenderOutputSize(m_pRenderer, &windowWidth, &windowHeight);
-
-  SDL_Texture* texture =
-      SDL_CreateTexture(m_pRenderer, SDL_PIXELFORMAT_RGB24, SDL_TEXTUREACCESS_STATIC, width, height);
-  if (texture == nullptr)
-  {
-    return;
-  }
-
-  SDL_UpdateTexture(texture, nullptr, pData, width * 3);
-  SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_NEAREST);
-
-  SDL_SetRenderDrawColor(m_pRenderer, 0, 0, 0, 255);
-  SDL_RenderClear(m_pRenderer);
-
-  SDL_FRect dest = {0.0f, 0.0f, static_cast<float>(windowWidth), static_cast<float>(windowHeight)};
-  SDL_RenderTexture(m_pRenderer, texture, nullptr, &dest);
-  SDL_RenderPresent(m_pRenderer);
-
-  SDL_DestroyTexture(texture);
 }
 
 void SDLDMD::RenderScaledDots(uint8_t* pData, uint16_t width, uint16_t height, int scaleFactor)
@@ -664,12 +705,6 @@ void SDLDMD::RenderScaledSquares(uint8_t* pData, uint16_t width, uint16_t height
 
 void SDLDMD::RenderSquares(uint8_t* pData, uint16_t width, uint16_t height)
 {
-  if (UseTextureRendererFallback())
-  {
-    RenderTextureNearest(pData, width, height);
-    return;
-  }
-
   int windowWidth = 0;
   int windowHeight = 0;
   SDL_GetRenderOutputSize(m_pRenderer, &windowWidth, &windowHeight);
