@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "DMDUtil/Config.h"
+#include "Logger.h"
 #include "xbrz/xbrz.h"
 
 namespace DMDUtil
@@ -16,6 +17,7 @@ namespace
 std::mutex g_sdldmdSdlMutex;
 int g_sdldmdInstanceCount = 0;
 bool g_sdldmdOwnsVideoSubsystem = false;
+SDLDMDConfig* g_installedSDLDMDConfig = nullptr;
 
 std::string ToLower(std::string value)
 {
@@ -57,7 +59,7 @@ const char* GetDefaultVideoDriver(const char* preferredVideoDriver)
 
 SDLDMDConfig* GetInstalledSDLDMDConfig()
 {
-  return dynamic_cast<SDLDMDConfig*>(Config::GetInstance());
+  return g_installedSDLDMDConfig;
 }
 
 bool ResolveWindowPositionForScreen(int screenIndex, int windowX, int windowY, int* pResolvedX, int* pResolvedY)
@@ -255,11 +257,14 @@ SDLDMDConfig* InstallSDLDMDConfig()
 {
   if (SDLDMDConfig* const pConfig = GetInstalledSDLDMDConfig())
   {
+    Log(DMDUtil_LogLevel_INFO, "LCD-DMD config already installed");
     return pConfig;
   }
 
   SDLDMDConfig* const pConfig = new SDLDMDConfig();
   Config::SetInstance(pConfig);
+  g_installedSDLDMDConfig = pConfig;
+  Log(DMDUtil_LogLevel_INFO, "Installed LCD-DMD config");
   return pConfig;
 }
 
@@ -268,8 +273,15 @@ SDLDMD* CreateSDLDMDFromConfig(DMD& dmd, const char* title, uint16_t width, uint
 {
   SDL_ClearError();
   SDLDMDConfig* const pConfig = GetInstalledSDLDMDConfig();
-  if (pConfig == nullptr || !pConfig->IsLCDDMDEnabled())
+  if (pConfig == nullptr)
   {
+    Log(DMDUtil_LogLevel_ERROR, "LCD-DMD config is not installed");
+    return nullptr;
+  }
+
+  if (!pConfig->IsLCDDMDEnabled())
+  {
+    Log(DMDUtil_LogLevel_INFO, "LCD-DMD output disabled in config");
     return nullptr;
   }
 
@@ -285,6 +297,15 @@ SDLDMD* CreateSDLDMDFromConfig(DMD& dmd, const char* title, uint16_t width, uint
     SDL_SetError("Unsupported LCD-DMD renderer '%s'", pConfig->GetLCDDMDRenderer());
     return nullptr;
   }
+
+  Log(DMDUtil_LogLevel_INFO,
+      "Creating LCD-DMD output: %dx%d screen=%d x=%d y=%d renderer=%s",
+      pConfig->GetLCDDMDWidth(),
+      pConfig->GetLCDDMDHeight(),
+      pConfig->GetLCDDMDScreen(),
+      pConfig->GetLCDDMDX(),
+      pConfig->GetLCDDMDY(),
+      pConfig->GetLCDDMDRenderer());
 
   return CreateSDLDMD(dmd, title, static_cast<uint16_t>(pConfig->GetLCDDMDWidth()),
                       static_cast<uint16_t>(pConfig->GetLCDDMDHeight()), windowFlags, width, height,
