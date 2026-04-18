@@ -162,8 +162,8 @@ void LogDisplaySetup(SDL_Window* pWindow, SDL_Renderer* pRenderer, int requested
       SDL_Rect displayBounds;
       const bool hasBounds = SDL_GetDisplayBounds(pDisplays[i], &displayBounds);
 
-      SDL_DisplayMode mode;
-      const bool hasMode = SDL_GetCurrentDisplayMode(pDisplays[i], &mode);
+      const SDL_DisplayMode* pMode = SDL_GetCurrentDisplayMode(pDisplays[i]);
+      const bool hasMode = pMode != nullptr;
 
       Log(DMDUtil_LogLevel_INFO,
           "SDLDMD display[%d]: id=%u bounds=%dx%d+%d+%d mode=%dx%d@%.2f",
@@ -173,9 +173,9 @@ void LogDisplaySetup(SDL_Window* pWindow, SDL_Renderer* pRenderer, int requested
           hasBounds ? displayBounds.h : -1,
           hasBounds ? displayBounds.x : -1,
           hasBounds ? displayBounds.y : -1,
-          hasMode ? mode.w : -1,
-          hasMode ? mode.h : -1,
-          hasMode ? static_cast<double>(mode.refresh_rate) : -1.0);
+          hasMode ? pMode->w : -1,
+          hasMode ? pMode->h : -1,
+          hasMode ? static_cast<double>(pMode->refresh_rate) : -1.0);
     }
     SDL_free(pDisplays);
   }
