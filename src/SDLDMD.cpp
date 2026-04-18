@@ -27,6 +27,35 @@ std::string ToLower(std::string value)
   return value;
 }
 
+const char* RenderingModeToString(SDLDMD::RenderingMode renderingMode)
+{
+  switch (renderingMode)
+  {
+    case SDLDMD::RenderingMode::Dots:
+      return "dots";
+    case SDLDMD::RenderingMode::Square:
+      return "squares";
+    case SDLDMD::RenderingMode::Scale2x:
+      return "scale2x";
+    case SDLDMD::RenderingMode::Scale4x:
+      return "scale4x";
+    case SDLDMD::RenderingMode::Scale2xDots:
+      return "scale2x-dots";
+    case SDLDMD::RenderingMode::Scale4xDots:
+      return "scale4x-dots";
+    case SDLDMD::RenderingMode::Scale2xSquares:
+      return "scale2x-squares";
+    case SDLDMD::RenderingMode::Scale4xSquares:
+      return "scale4x-squares";
+    case SDLDMD::RenderingMode::SmoothScaling:
+      return "smooth";
+    case SDLDMD::RenderingMode::XBRZ:
+      return "xbrz";
+  }
+
+  return "unknown";
+}
+
 bool SetEnvIfUnset(const char* name, const char* value)
 {
   if (name == nullptr || value == nullptr) return false;
@@ -239,6 +268,21 @@ SDLDMD* CreateSDLDMD(DMD& dmd, const char* title, uint16_t windowWidth, uint16_t
                      SDLDMD::RenderingMode renderingMode,
                      const char* preferredVideoDriver)
 {
+  const char* const requestedVideoDriver = GetDefaultVideoDriver(preferredVideoDriver);
+  Log(DMDUtil_LogLevel_INFO,
+      "SDLDMD setup: title='%s' window=%ux%u dmd=%ux%u screen=%d x=%d y=%d renderer=%s videoDriver=%s flags=0x%x",
+      title ? title : "",
+      windowWidth,
+      windowHeight,
+      width,
+      height,
+      screenIndex,
+      windowX,
+      windowY,
+      RenderingModeToString(renderingMode),
+      (requestedVideoDriver && *requestedVideoDriver) ? requestedVideoDriver : "default",
+      windowFlags);
+
   SDLDMD* const pSDLDMD =
       new SDLDMD(title, windowWidth, windowHeight, windowFlags, width, height, screenIndex, windowX, windowY, renderingMode,
                  preferredVideoDriver);
@@ -250,6 +294,12 @@ SDLDMD* CreateSDLDMD(DMD& dmd, const char* title, uint16_t windowWidth, uint16_t
   }
 
   dmd.AddRGB24DMD(pSDLDMD);
+  const char* const actualVideoDriver = SDL_GetCurrentVideoDriver();
+  Log(DMDUtil_LogLevel_INFO,
+      "SDLDMD setup succeeded: renderer=%s hardware=%d videoDriver=%s",
+      pSDLDMD->GetRendererName() ? pSDLDMD->GetRendererName() : "",
+      pSDLDMD->IsHardwareAccelerated() ? 1 : 0,
+      (actualVideoDriver && *actualVideoDriver) ? actualVideoDriver : "unknown");
   return pSDLDMD;
 }
 
