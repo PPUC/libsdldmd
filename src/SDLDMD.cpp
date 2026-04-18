@@ -7,7 +7,7 @@
 #include <vector>
 
 #include "DMDUtil/Config.h"
-#include "Logger.h"
+#include "DMDUtil/Logger.h"
 #include "xbrz/xbrz.h"
 
 namespace DMDUtil
