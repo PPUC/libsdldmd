@@ -212,6 +212,8 @@ SDLDMD::SDLDMD(const char* title, uint16_t windowWidth, uint16_t windowHeight, u
       m_managesSDLVideo = true;
     }
 
+    SDL_HideCursor();
+
     ++g_sdldmdInstanceCount;
     m_registeredSDLInstance = true;
   }
@@ -451,6 +453,21 @@ void SDLDMD::Update(uint8_t* pData, uint16_t width, uint16_t height)
 {
   RGB24DMD::Update(pData, width, height);
   if (!m_update) return;
+
+  if (!m_loggedFirstFrame)
+  {
+    int outputWidth = 0;
+    int outputHeight = 0;
+    SDL_GetRenderOutputSize(m_pRenderer, &outputWidth, &outputHeight);
+    Log(DMDUtil_LogLevel_INFO,
+        "SDLDMD received first frame: frame=%ux%u output=%dx%d renderer=%s",
+        m_width,
+        m_height,
+        outputWidth,
+        outputHeight,
+        m_rendererName.empty() ? "" : m_rendererName.c_str());
+    m_loggedFirstFrame = true;
+  }
 
   switch (m_renderingMode)
   {

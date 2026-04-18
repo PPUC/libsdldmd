@@ -63,6 +63,7 @@ class SDLDMD : public RGB24DMD
   int m_renderingMode = RenderingMode::Dots;
   bool m_managesSDLVideo = false;
   bool m_registeredSDLInstance = false;
+  bool m_loggedFirstFrame = false;
 
   bool CreateRendererWithFallbacks();
   void RenderDots(uint8_t* pData, uint16_t width, uint16_t height);
