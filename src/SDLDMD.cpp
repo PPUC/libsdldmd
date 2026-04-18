@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstring>
 #include <cstdlib>
 #include <mutex>
 #include <vector>
@@ -84,6 +85,16 @@ const char* GetDefaultVideoDriver(const char* preferredVideoDriver)
   (void)preferredVideoDriver;
 #endif
   return preferredVideoDriver;
+}
+
+bool IsFullscreenVideoDriver(const char* videoDriver)
+{
+#if defined(__linux__) && !defined(__ANDROID__)
+  return videoDriver != nullptr && std::strcmp(videoDriver, "kmsdrm") == 0;
+#else
+  (void)videoDriver;
+  return false;
+#endif
 }
 
 SDLDMDConfig* GetInstalledSDLDMDConfig()
@@ -185,6 +196,11 @@ SDLDMD::SDLDMD(const char* title, uint16_t windowWidth, uint16_t windowHeight, u
       SetEnvIfUnset("SDL_VIDEODRIVER", videoDriver);
     }
 
+    if (IsFullscreenVideoDriver(videoDriver))
+    {
+      windowFlags |= SDL_WINDOW_FULLSCREEN;
+    }
+
     if ((SDL_WasInit(SDL_INIT_VIDEO) & SDL_INIT_VIDEO) == 0)
     {
       if (!SDL_Init(SDL_INIT_VIDEO))
@@ -235,7 +251,7 @@ SDLDMD::SDLDMD(const char* title, uint16_t windowWidth, uint16_t windowHeight, u
     return;
   }
 
-  if (!hasExplicitWindowPosition)
+  if ((windowFlags & SDL_WINDOW_FULLSCREEN) == 0 && !hasExplicitWindowPosition)
   {
     SDL_SetWindowPosition(m_pWindow, 0, 0);
   }
