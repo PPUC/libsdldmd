@@ -56,6 +56,23 @@ const char* RenderingModeToString(SDLDMD::RenderingMode renderingMode)
   return "unknown";
 }
 
+const char* RotationToString(SDLDMD::Rotation rotation)
+{
+  switch (rotation)
+  {
+    case SDLDMD::Rotation::Rotate0:
+      return "0";
+    case SDLDMD::Rotation::Rotate90:
+      return "90";
+    case SDLDMD::Rotation::Rotate180:
+      return "180";
+    case SDLDMD::Rotation::Rotate270:
+      return "270";
+  }
+
+  return "unknown";
+}
+
 bool SetEnvIfUnset(const char* name, const char* value)
 {
   if (name == nullptr || value == nullptr) return false;
@@ -170,8 +187,9 @@ bool SDLDMD::CreateRendererWithFallbacks()
 
 SDLDMD::SDLDMD(const char* title, uint16_t windowWidth, uint16_t windowHeight, uint32_t windowFlags, uint16_t width,
                uint16_t height, int screenIndex, int windowX, int windowY, RenderingMode renderingMode,
+               Rotation rotation,
                const char* preferredVideoDriver)
-    : RGB24DMD(width, height), m_pRenderer(nullptr), m_renderingMode(renderingMode)
+    : RGB24DMD(width, height), m_pRenderer(nullptr), m_renderingMode(renderingMode), m_rotation(rotation)
 {
   {
     std::lock_guard<std::mutex> lock(g_sdldmdSdlMutex);
@@ -236,6 +254,8 @@ SDLDMD::SDLDMD(const char* title, uint16_t windowWidth, uint16_t windowHeight, u
     SDL_SetWindowPosition(m_pWindow, 0, 0);
   }
   while (!SDL_SyncWindow(m_pWindow));
+
+  Log(DMDUtil_LogLevel_INFO, "SDLDMD rotation=%s", RotationToString(m_rotation));
 }
 
 SDLDMD::~SDLDMD()
@@ -261,12 +281,12 @@ SDLDMD::~SDLDMD()
 
 SDLDMD* CreateSDLDMD(DMD& dmd, const char* title, uint16_t windowWidth, uint16_t windowHeight, uint32_t windowFlags,
                      uint16_t width, uint16_t height, int screenIndex, int windowX, int windowY,
-                     SDLDMD::RenderingMode renderingMode,
+                     SDLDMD::RenderingMode renderingMode, SDLDMD::Rotation rotation,
                      const char* preferredVideoDriver)
 {
   const char* const requestedVideoDriver = GetDefaultVideoDriver(preferredVideoDriver);
   Log(DMDUtil_LogLevel_INFO,
-      "SDLDMD setup: title='%s' window=%ux%u dmd=%ux%u screen=%d x=%d y=%d renderer=%s videoDriver=%s flags=0x%x",
+      "SDLDMD setup: title='%s' window=%ux%u dmd=%ux%u screen=%d x=%d y=%d renderer=%s rotation=%s videoDriver=%s flags=0x%x",
       title ? title : "",
       windowWidth,
       windowHeight,
@@ -276,12 +296,13 @@ SDLDMD* CreateSDLDMD(DMD& dmd, const char* title, uint16_t windowWidth, uint16_t
       windowX,
       windowY,
       RenderingModeToString(renderingMode),
+      RotationToString(rotation),
       (requestedVideoDriver && *requestedVideoDriver) ? requestedVideoDriver : "default",
       windowFlags);
 
   SDLDMD* const pSDLDMD =
-      new SDLDMD(title, windowWidth, windowHeight, windowFlags, width, height, screenIndex, windowX, windowY, renderingMode,
-                 preferredVideoDriver);
+      new SDLDMD(title, windowWidth, windowHeight, windowFlags, width, height, screenIndex, windowX, windowY,
+                 renderingMode, rotation, preferredVideoDriver);
   if (!pSDLDMD->IsReady())
   {
     SDL_SetError("%s", pSDLDMD->GetError() ? pSDLDMD->GetError() : "Unknown SDL DMD error");
@@ -297,6 +318,14 @@ SDLDMD* CreateSDLDMD(DMD& dmd, const char* title, uint16_t windowWidth, uint16_t
       pSDLDMD->IsHardwareAccelerated() ? 1 : 0,
       (actualVideoDriver && *actualVideoDriver) ? actualVideoDriver : "unknown");
   return pSDLDMD;
+}
+
+SDLDMD* CreateSDLDMD(DMD& dmd, const char* title, uint16_t windowWidth, uint16_t windowHeight, uint32_t windowFlags,
+                     uint16_t width, uint16_t height, int screenIndex, int windowX, int windowY,
+                     SDLDMD::RenderingMode renderingMode, const char* preferredVideoDriver)
+{
+  return CreateSDLDMD(dmd, title, windowWidth, windowHeight, windowFlags, width, height, screenIndex, windowX,
+                      windowY, renderingMode, SDLDMD::Rotation::Rotate0, preferredVideoDriver);
 }
 
 SDLDMDConfig* InstallSDLDMDConfig()
@@ -317,6 +346,9 @@ SDLDMDConfig* InstallSDLDMDConfig()
 SDLDMD* CreateSDLDMDFromConfig(DMD& dmd, const char* title, uint16_t width, uint16_t height, uint32_t windowFlags,
                                const char* preferredVideoDriver)
 {
+  constexpr uint16_t kHDWidth = 256;
+  constexpr uint16_t kHDHeight = 64;
+
   SDL_ClearError();
   SDLDMDConfig* const pConfig = GetInstalledSDLDMDConfig();
   if (pConfig == nullptr)
@@ -344,19 +376,33 @@ SDLDMD* CreateSDLDMDFromConfig(DMD& dmd, const char* title, uint16_t width, uint
     return nullptr;
   }
 
+  SDLDMD::Rotation rotation = SDLDMD::Rotation::Rotate0;
+  if (!ParseSDLDMDRotation(std::to_string(pConfig->GetLCDDMDRotation()).c_str(), &rotation))
+  {
+    SDL_SetError("Unsupported LCD-DMD rotation '%d'", pConfig->GetLCDDMDRotation());
+    return nullptr;
+  }
+
+  const uint16_t logicalWidth = pConfig->IsLCDDMDHD() ? kHDWidth : width;
+  const uint16_t logicalHeight = pConfig->IsLCDDMDHD() ? kHDHeight : height;
+
   Log(DMDUtil_LogLevel_INFO,
-      "Creating LCD-DMD output: %dx%d screen=%d x=%d y=%d renderer=%s",
+      "Creating LCD-DMD output: %dx%d screen=%d x=%d y=%d renderer=%s rotation=%d hd=%d logical=%ux%u",
       pConfig->GetLCDDMDWidth(),
       pConfig->GetLCDDMDHeight(),
       pConfig->GetLCDDMDScreen(),
       pConfig->GetLCDDMDX(),
       pConfig->GetLCDDMDY(),
-      pConfig->GetLCDDMDRenderer());
+      pConfig->GetLCDDMDRenderer(),
+      pConfig->GetLCDDMDRotation(),
+      pConfig->IsLCDDMDHD() ? 1 : 0,
+      logicalWidth,
+      logicalHeight);
 
   return CreateSDLDMD(dmd, title, static_cast<uint16_t>(pConfig->GetLCDDMDWidth()),
-                      static_cast<uint16_t>(pConfig->GetLCDDMDHeight()), windowFlags, width, height,
+                      static_cast<uint16_t>(pConfig->GetLCDDMDHeight()), windowFlags, logicalWidth, logicalHeight,
                       pConfig->GetLCDDMDScreen(),
-                      pConfig->GetLCDDMDX(), pConfig->GetLCDDMDY(), renderingMode, preferredVideoDriver);
+                      pConfig->GetLCDDMDX(), pConfig->GetLCDDMDY(), renderingMode, rotation, preferredVideoDriver);
 }
 
 bool DestroySDLDMD(DMD& dmd, SDLDMD* pSDLDMD) { return dmd.DestroyRGB24DMD(pSDLDMD); }
@@ -427,51 +473,144 @@ bool ParseSDLDMDRenderingMode(const char* value, SDLDMD::RenderingMode* pRenderi
   return false;
 }
 
+bool ParseSDLDMDRotation(const char* value, SDLDMD::Rotation* pRotation)
+{
+  if (value == nullptr || pRotation == nullptr) return false;
+
+  const std::string rotation = ToLower(value);
+  if (rotation == "0")
+  {
+    *pRotation = SDLDMD::Rotation::Rotate0;
+    return true;
+  }
+  if (rotation == "90")
+  {
+    *pRotation = SDLDMD::Rotation::Rotate90;
+    return true;
+  }
+  if (rotation == "180")
+  {
+    *pRotation = SDLDMD::Rotation::Rotate180;
+    return true;
+  }
+  if (rotation == "270")
+  {
+    *pRotation = SDLDMD::Rotation::Rotate270;
+    return true;
+  }
+
+  return false;
+}
+
+void SDLDMD::RotateFrameIfNeeded(uint8_t* pData, uint16_t width, uint16_t height, uint8_t** ppRenderData,
+                                 uint16_t* pRenderWidth, uint16_t* pRenderHeight)
+{
+  if (ppRenderData == nullptr || pRenderWidth == nullptr || pRenderHeight == nullptr)
+  {
+    return;
+  }
+
+  *ppRenderData = pData;
+  *pRenderWidth = width;
+  *pRenderHeight = height;
+
+  if (m_rotation == Rotation::Rotate0 || pData == nullptr)
+  {
+    return;
+  }
+
+  const bool quarterTurn = m_rotation == Rotation::Rotate90 || m_rotation == Rotation::Rotate270;
+  const uint16_t rotatedWidth = quarterTurn ? height : width;
+  const uint16_t rotatedHeight = quarterTurn ? width : height;
+  m_rotatedBuffer.assign(static_cast<size_t>(rotatedWidth) * rotatedHeight * 3u, 0);
+
+  for (uint16_t y = 0; y < height; ++y)
+  {
+    for (uint16_t x = 0; x < width; ++x)
+    {
+      uint16_t rotatedX = x;
+      uint16_t rotatedY = y;
+      switch (m_rotation)
+      {
+        case Rotation::Rotate90:
+          rotatedX = static_cast<uint16_t>(height - 1 - y);
+          rotatedY = x;
+          break;
+        case Rotation::Rotate180:
+          rotatedX = static_cast<uint16_t>(width - 1 - x);
+          rotatedY = static_cast<uint16_t>(height - 1 - y);
+          break;
+        case Rotation::Rotate270:
+          rotatedX = y;
+          rotatedY = static_cast<uint16_t>(width - 1 - x);
+          break;
+        default:
+          break;
+      }
+
+      const size_t srcIndex = (static_cast<size_t>(y) * width + x) * 3u;
+      const size_t dstIndex = (static_cast<size_t>(rotatedY) * rotatedWidth + rotatedX) * 3u;
+      m_rotatedBuffer[dstIndex] = pData[srcIndex];
+      m_rotatedBuffer[dstIndex + 1] = pData[srcIndex + 1];
+      m_rotatedBuffer[dstIndex + 2] = pData[srcIndex + 2];
+    }
+  }
+
+  *ppRenderData = m_rotatedBuffer.data();
+  *pRenderWidth = rotatedWidth;
+  *pRenderHeight = rotatedHeight;
+}
+
 void SDLDMD::Update(uint8_t* pData, uint16_t width, uint16_t height)
 {
   RGB24DMD::Update(pData, width, height);
   if (!m_update) return;
 
+  uint8_t* pRenderData = m_pData;
+  uint16_t renderWidth = m_width;
+  uint16_t renderHeight = m_height;
+  RotateFrameIfNeeded(m_pData, m_width, m_height, &pRenderData, &renderWidth, &renderHeight);
+
   switch (m_renderingMode)
   {
     case RenderingMode::Square:
-      RenderSquares(m_pData, m_width, m_height);
+      RenderSquares(pRenderData, renderWidth, renderHeight);
       break;
 
     case RenderingMode::Scale2x:
-      RenderScaledNearest(m_pData, m_width, m_height, 2);
+      RenderScaledNearest(pRenderData, renderWidth, renderHeight, 2);
       break;
 
     case RenderingMode::Scale4x:
-      RenderScaledNearest(m_pData, m_width, m_height, 4);
+      RenderScaledNearest(pRenderData, renderWidth, renderHeight, 4);
       break;
 
     case RenderingMode::Scale2xDots:
-      RenderScaledDots(m_pData, m_width, m_height, 2);
+      RenderScaledDots(pRenderData, renderWidth, renderHeight, 2);
       break;
 
     case RenderingMode::Scale4xDots:
-      RenderScaledDots(m_pData, m_width, m_height, 4);
+      RenderScaledDots(pRenderData, renderWidth, renderHeight, 4);
       break;
 
     case RenderingMode::Scale2xSquares:
-      RenderScaledSquares(m_pData, m_width, m_height, 2);
+      RenderScaledSquares(pRenderData, renderWidth, renderHeight, 2);
       break;
 
     case RenderingMode::Scale4xSquares:
-      RenderScaledSquares(m_pData, m_width, m_height, 4);
+      RenderScaledSquares(pRenderData, renderWidth, renderHeight, 4);
       break;
 
     case RenderingMode::SmoothScaling:
-      RenderSmoothScaling(m_pData, m_width, m_height);
+      RenderSmoothScaling(pRenderData, renderWidth, renderHeight);
       break;
 
     case RenderingMode::XBRZ:
-      RenderXBRZ(m_pData, m_width, m_height);
+      RenderXBRZ(pRenderData, renderWidth, renderHeight);
       break;
 
     default:
-      RenderDots(m_pData, m_width, m_height);
+      RenderDots(pRenderData, renderWidth, renderHeight);
       break;
   }
 }

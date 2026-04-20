@@ -48,11 +48,13 @@ void SDLDMDConfig::parseConfigFile(const char* path)
   Config::parseConfigFile(path);
 
   m_lcddmdEnabled = false;
+  m_lcddmdHD = false;
   m_lcddmdX = 0;
   m_lcddmdY = 0;
   m_lcddmdWidth = 1024;
   m_lcddmdHeight = 256;
   m_lcddmdScreen = -1;
+  m_lcddmdRotation = 0;
   m_lcddmdRenderer = "dots";
 
   if (path == nullptr)
@@ -97,6 +99,10 @@ void SDLDMDConfig::parseConfigFile(const char* path)
     {
       m_lcddmdEnabled = ParseIniBool(value, m_lcddmdEnabled);
     }
+    else if (key == "HD")
+    {
+      m_lcddmdHD = ParseIniBool(value, m_lcddmdHD);
+    }
     else if (key == "Screen")
     {
       m_lcddmdScreen = std::atoi(value.c_str());
@@ -120,6 +126,10 @@ void SDLDMDConfig::parseConfigFile(const char* path)
     else if (key == "Renderer")
     {
       m_lcddmdRenderer = value;
+    }
+    else if (key == "Rotation")
+    {
+      m_lcddmdRotation = std::atoi(value.c_str());
     }
   }
 }

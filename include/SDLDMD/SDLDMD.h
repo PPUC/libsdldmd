@@ -12,6 +12,7 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 #include <SDL3/SDL.h>
 
@@ -39,11 +40,19 @@ class SDLDMD : public RGB24DMD
     SmoothScaling = 8,
     XBRZ = 9,
   };
+  enum Rotation : int
+  {
+    Rotate0 = 0,
+    Rotate90 = 1,
+    Rotate180 = 2,
+    Rotate270 = 3,
+  };
 
   SDLDMD(const char* title, uint16_t windowWidth, uint16_t windowHeight, uint32_t windowFlags, uint16_t width,
          uint16_t height, int screenIndex = -1, int windowX = SDL_WINDOWPOS_UNDEFINED,
          int windowY = SDL_WINDOWPOS_UNDEFINED,
-         RenderingMode renderingMode = RenderingMode::Dots, const char* preferredVideoDriver = nullptr);
+         RenderingMode renderingMode = RenderingMode::Dots, Rotation rotation = Rotation::Rotate0,
+         const char* preferredVideoDriver = nullptr);
 
   ~SDLDMD() override;
 
@@ -56,13 +65,17 @@ class SDLDMD : public RGB24DMD
   bool IsHardwareAccelerated() const { return !m_rendererName.empty() && m_rendererName != "software"; }
 
  private:
+  void RotateFrameIfNeeded(uint8_t* pData, uint16_t width, uint16_t height, uint8_t** ppRenderData, uint16_t* pRenderWidth,
+                           uint16_t* pRenderHeight);
   SDL_Window* m_pWindow = nullptr;
   SDL_Renderer* m_pRenderer;
   std::string m_error;
   std::string m_rendererName;
   int m_renderingMode = RenderingMode::Dots;
+  Rotation m_rotation = Rotation::Rotate0;
   bool m_managesSDLVideo = false;
   bool m_registeredSDLInstance = false;
+  std::vector<uint8_t> m_rotatedBuffer;
 
   bool CreateRendererWithFallbacks();
   void RenderDots(uint8_t* pData, uint16_t width, uint16_t height);
@@ -79,7 +92,13 @@ SDLDMDAPI SDLDMD* CreateSDLDMD(DMD& dmd, const char* title, uint16_t windowWidth
                                int screenIndex = -1, int windowX = SDL_WINDOWPOS_UNDEFINED,
                                int windowY = SDL_WINDOWPOS_UNDEFINED,
                                SDLDMD::RenderingMode renderingMode = SDLDMD::RenderingMode::Dots,
+                               SDLDMD::Rotation rotation = SDLDMD::Rotation::Rotate0,
                                const char* preferredVideoDriver = nullptr);
+SDLDMDAPI SDLDMD* CreateSDLDMD(DMD& dmd, const char* title, uint16_t windowWidth, uint16_t windowHeight,
+                               uint32_t windowFlags, uint16_t width, uint16_t height,
+                               int screenIndex, int windowX, int windowY,
+                               SDLDMD::RenderingMode renderingMode,
+                               const char* preferredVideoDriver);
 SDLDMDAPI SDLDMDConfig* InstallSDLDMDConfig();
 SDLDMDAPI SDLDMD* CreateSDLDMDFromConfig(DMD& dmd, const char* title, uint16_t width = 128, uint16_t height = 32,
                                          uint32_t windowFlags = 0,
@@ -87,5 +106,6 @@ SDLDMDAPI SDLDMD* CreateSDLDMDFromConfig(DMD& dmd, const char* title, uint16_t w
 SDLDMDAPI bool DestroySDLDMD(DMD& dmd, SDLDMD* pSDLDMD);
 SDLDMDAPI bool SetSDLDMDRenderingMode(SDLDMD* pSDLDMD, SDLDMD::RenderingMode renderingMode);
 SDLDMDAPI bool ParseSDLDMDRenderingMode(const char* value, SDLDMD::RenderingMode* pRenderingMode);
+SDLDMDAPI bool ParseSDLDMDRotation(const char* value, SDLDMD::Rotation* pRotation);
 
 }  // namespace DMDUtil
