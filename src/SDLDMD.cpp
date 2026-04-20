@@ -69,7 +69,7 @@ bool SetEnvIfUnset(const char* name, const char* value)
 
 const char* GetDefaultVideoDriver(const char* preferredVideoDriver)
 {
-#if defined(__linux__) && !defined(__ANDROID__)
+#if defined(__linux__)
   if (preferredVideoDriver && *preferredVideoDriver)
   {
     return preferredVideoDriver;
@@ -142,11 +142,7 @@ bool ResolveWindowPositionForScreen(int screenIndex, int windowX, int windowY, i
 
 bool SDLDMD::CreateRendererWithFallbacks()
 {
-#if defined(__ANDROID__) || defined(TARGET_OS_IPHONE) || defined(TARGET_OS_TV)
-  static const char* kRendererCandidates[] = {"opengles2", nullptr};
-#else
   static const char* kRendererCandidates[] = {"opengl", "opengles2", nullptr};
-#endif
 
   std::string lastError;
   for (const char* rendererName : kRendererCandidates)
