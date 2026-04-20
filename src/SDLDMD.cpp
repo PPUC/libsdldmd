@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <cctype>
-#include <cstring>
 #include <cstdlib>
 #include <mutex>
 #include <vector>
@@ -87,16 +86,6 @@ const char* GetDefaultVideoDriver(const char* preferredVideoDriver)
   return preferredVideoDriver;
 }
 
-bool IsFullscreenVideoDriver(const char* videoDriver)
-{
-#if defined(__linux__) && !defined(__ANDROID__)
-  return videoDriver != nullptr && std::strcmp(videoDriver, "kmsdrm") == 0;
-#else
-  (void)videoDriver;
-  return false;
-#endif
-}
-
 SDLDMDConfig* GetInstalledSDLDMDConfig()
 {
   return g_installedSDLDMDConfig;
@@ -149,85 +138,6 @@ bool ResolveWindowPositionForScreen(int screenIndex, int windowX, int windowY, i
   *pResolvedY = displayBounds.y + relativeY;
   return true;
 }
-
-void LogDisplaySetup(SDL_Window* pWindow, SDL_Renderer* pRenderer, int requestedScreenIndex)
-{
-  int numDisplays = 0;
-  SDL_DisplayID* pDisplays = SDL_GetDisplays(&numDisplays);
-  if (pDisplays != nullptr)
-  {
-    Log(DMDUtil_LogLevel_INFO, "SDLDMD displays detected: count=%d requestedScreen=%d", numDisplays, requestedScreenIndex);
-    for (int i = 0; i < numDisplays; ++i)
-    {
-      SDL_Rect displayBounds;
-      const bool hasBounds = SDL_GetDisplayBounds(pDisplays[i], &displayBounds);
-
-      const SDL_DisplayMode* pMode = SDL_GetCurrentDisplayMode(pDisplays[i]);
-      const bool hasMode = pMode != nullptr;
-
-      Log(DMDUtil_LogLevel_INFO,
-          "SDLDMD display[%d]: id=%u bounds=%dx%d+%d+%d mode=%dx%d@%.2f",
-          i,
-          static_cast<unsigned int>(pDisplays[i]),
-          hasBounds ? displayBounds.w : -1,
-          hasBounds ? displayBounds.h : -1,
-          hasBounds ? displayBounds.x : -1,
-          hasBounds ? displayBounds.y : -1,
-          hasMode ? pMode->w : -1,
-          hasMode ? pMode->h : -1,
-          hasMode ? static_cast<double>(pMode->refresh_rate) : -1.0);
-    }
-    SDL_free(pDisplays);
-  }
-  else if (const char* const error = SDL_GetError(); error && *error)
-  {
-    Log(DMDUtil_LogLevel_INFO, "SDLDMD displays query failed: %s", error);
-  }
-
-  if (pWindow != nullptr)
-  {
-    int windowWidth = 0;
-    int windowHeight = 0;
-    SDL_GetWindowSizeInPixels(pWindow, &windowWidth, &windowHeight);
-    Log(DMDUtil_LogLevel_INFO, "SDLDMD window pixels: %dx%d", windowWidth, windowHeight);
-  }
-
-  if (pRenderer != nullptr)
-  {
-    int outputWidth = 0;
-    int outputHeight = 0;
-    SDL_GetRenderOutputSize(pRenderer, &outputWidth, &outputHeight);
-    Log(DMDUtil_LogLevel_INFO, "SDLDMD render output: %dx%d", outputWidth, outputHeight);
-  }
-}
-
-bool SyncWindowAndWaitUntilShown(SDL_Window* pWindow)
-{
-  if (pWindow == nullptr)
-  {
-    return false;
-  }
-
-  const Uint64 deadline = SDL_GetTicks() + 3000;
-  while (SDL_GetTicks() < deadline)
-  {
-    if (SDL_SyncWindow(pWindow))
-    {
-      return true;
-    }
-    SDL_Delay(10);
-  }
-
-  if (const char* const error = SDL_GetError(); error && *error)
-  {
-    Log(DMDUtil_LogLevel_INFO, "SDLDMD window sync timed out: %s", error);
-  }
-  else
-  {
-    Log(DMDUtil_LogLevel_INFO, "SDLDMD window sync timed out without SDL error");
-  }
-  return false;
-}
 }  // namespace
 
 bool SDLDMD::CreateRendererWithFallbacks()
@@ -275,11 +185,6 @@ SDLDMD::SDLDMD(const char* title, uint16_t windowWidth, uint16_t windowHeight, u
       SetEnvIfUnset("SDL_VIDEODRIVER", videoDriver);
     }
 
-    if (IsFullscreenVideoDriver(videoDriver))
-    {
-      windowFlags |= SDL_WINDOW_FULLSCREEN;
-    }
-
     if ((SDL_WasInit(SDL_INIT_VIDEO) & SDL_INIT_VIDEO) == 0)
     {
       if (!SDL_Init(SDL_INIT_VIDEO))
@@ -290,8 +195,6 @@ SDLDMD::SDLDMD(const char* title, uint16_t windowWidth, uint16_t windowHeight, u
       g_sdldmdOwnsVideoSubsystem = true;
       m_managesSDLVideo = true;
     }
-
-    SDL_HideCursor();
 
     ++g_sdldmdInstanceCount;
     m_registeredSDLInstance = true;
@@ -332,15 +235,11 @@ SDLDMD::SDLDMD(const char* title, uint16_t windowWidth, uint16_t windowHeight, u
     return;
   }
 
-  if ((windowFlags & SDL_WINDOW_FULLSCREEN) == 0 && !hasExplicitWindowPosition)
+  if (!hasExplicitWindowPosition)
   {
     SDL_SetWindowPosition(m_pWindow, 0, 0);
   }
-  if (!SyncWindowAndWaitUntilShown(m_pWindow))
-  {
-    Log(DMDUtil_LogLevel_INFO, "SDLDMD continuing after incomplete window sync");
-  }
-  LogDisplaySetup(m_pWindow, m_pRenderer, screenIndex);
+  while (!SDL_SyncWindow(m_pWindow));
 }
 
 SDLDMD::~SDLDMD()
@@ -536,21 +435,6 @@ void SDLDMD::Update(uint8_t* pData, uint16_t width, uint16_t height)
 {
   RGB24DMD::Update(pData, width, height);
   if (!m_update) return;
-
-  if (!m_loggedFirstFrame)
-  {
-    int outputWidth = 0;
-    int outputHeight = 0;
-    SDL_GetRenderOutputSize(m_pRenderer, &outputWidth, &outputHeight);
-    Log(DMDUtil_LogLevel_INFO,
-        "SDLDMD received first frame: frame=%ux%u output=%dx%d renderer=%s",
-        m_width,
-        m_height,
-        outputWidth,
-        outputHeight,
-        m_rendererName.empty() ? "" : m_rendererName.c_str());
-    m_loggedFirstFrame = true;
-  }
 
   switch (m_renderingMode)
   {
