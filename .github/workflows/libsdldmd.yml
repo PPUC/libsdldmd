@@ -46,8 +46,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { os: windows-2025, platform: win, arch: x64 }
-          - { os: windows-2025, platform: win, arch: x86 }
           - { os: windows-2025, platform: win-mingw, arch: x64 }
           - { os: macos-15, platform: macos, arch: arm64 }
           - { os: macos-15, platform: macos, arch: x64 }
@@ -55,15 +53,6 @@ jobs:
           - { os: ubuntu-24.04-arm, platform: linux, arch: aarch64 }
     steps:
       - uses: actions/checkout@v6
-      - if: (matrix.platform == 'win')
-        uses: microsoft/setup-msbuild@v2
-      - if: (matrix.platform == 'win')
-        run: |
-          if [[ "${{ matrix.arch }}" == "x64" ]]; then
-            /c/msys64/usr/bin/bash.exe -l -c "pacman -S --noconfirm make diffutils mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-libwinpthread mingw-w64-ucrt-x86_64-cmake"
-          else
-            /c/msys64/usr/bin/bash.exe -l -c "pacman -S --noconfirm make diffutils mingw-w64-i686-gcc mingw-w64-i686-libwinpthread mingw-w64-i686-cmake"
-          fi
       - if: (matrix.platform == 'win-mingw')
         run: |
           /c/msys64/usr/bin/bash.exe -l -c "pacman -S --noconfirm make diffutils autoconf automake libtool mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-libwinpthread mingw-w64-ucrt-x86_64-cmake"
@@ -83,25 +72,6 @@ jobs:
       - if: (matrix.platform == 'linux' && matrix.arch == 'aarch64')
         run: |
           sudo apt-get install -y libgpiod-dev
-      - if: (matrix.platform == 'win')
-        name: Build (win)
-        run: |
-          ./platforms/${{ matrix.platform }}/${{ matrix.arch }}/external.sh
-          if [[ "${{ matrix.arch }}" == "x64" ]]; then
-            cmake \
-              -G "Visual Studio 17 2022" \
-              -DPLATFORM=${{ matrix.platform }} \
-              -DARCH=${{ matrix.arch }} \
-              -B build
-          else
-            cmake \
-              -G "Visual Studio 17 2022" \
-              -A Win32 \
-              -DPLATFORM=${{ matrix.platform }} \
-              -DARCH=${{ matrix.arch }} \
-              -B build
-          fi
-          cmake --build build --config Release
       - if: (matrix.platform == 'win-mingw')
         name: Build (win-mingw)
         run: |
@@ -136,23 +106,6 @@ jobs:
             -DARCH=${{ matrix.arch }} \
             -B build
           cmake --build build -- -j$(nproc)
-      - if: (matrix.platform == 'win')
-        name: Prepare artifacts (win)
-        run: |
-          mkdir tmp
-          if [[ "${{ matrix.arch }}" == "x64" ]]; then
-            cp build/Release/sdldmd64.lib tmp/
-            cp build/Release/sdldmd64.dll tmp/
-            cp third-party/build-libs/win/x64/SDL364.lib tmp/
-            cp third-party/runtime-libs/win/x64/SDL364.dll tmp/
-          else
-            cp build/Release/sdldmd.lib tmp/
-            cp build/Release/sdldmd.dll tmp/
-            cp third-party/build-libs/win/x86/SDL3.lib tmp/
-            cp third-party/runtime-libs/win/x86/SDL3.dll tmp/
-          fi
-          cp build/Release/sdldmd_static.lib tmp/
-          cd tmp && 7z a -r ../libsdldmd-${{ needs.version.outputs.tag }}-${{ matrix.platform }}-${{ matrix.arch }}.zip *
       - if: (matrix.platform == 'win-mingw')
         name: Prepare artifacts (win-mingw)
         run: |
@@ -179,13 +132,13 @@ jobs:
           cp -a build/*.so.* tmp/
           cp -a third-party/runtime-libs/linux/${{ matrix.arch }}/libSDL3.so* tmp/
           cd tmp && tar -czvf ../libsdldmd-${{ needs.version.outputs.tag }}-${{ matrix.platform }}-${{ matrix.arch }}.tar.gz *
-      - if: (matrix.platform == 'win' || matrix.platform == 'win-mingw')
+      - if: (matrix.platform == 'win-mingw')
         uses: actions/upload-artifact@v7
         with:
           name: libsdldmd-${{ needs.version.outputs.tag }}-${{ matrix.platform }}-${{ matrix.arch }}.zip
           path: libsdldmd-${{ needs.version.outputs.tag }}-${{ matrix.platform }}-${{ matrix.arch }}.zip
           archive: false
-      - if: (matrix.platform != 'win' && matrix.platform != 'win-mingw')
+      - if: (matrix.platform != 'win-mingw')
         uses: actions/upload-artifact@v7
         with:
           name: libsdldmd-${{ needs.version.outputs.tag }}-${{ matrix.platform }}-${{ matrix.arch }}.tar.gz
