@@ -9,15 +9,14 @@ NUM_PROCS=$(nproc)
 echo "Building libraries..."
 echo "  SDL_SHA: ${SDL_SHA}"
 echo "  LIBDMDUTIL_SHA: ${LIBDMDUTIL_SHA}"
+ppuc_print_dependency_source LIBDMDUTIL libdmdutil "${LIBDMDUTIL_SHA}"
 echo ""
 
 rm -rf external
 mkdir -p external third-party/include third-party/runtime-libs/linux/aarch64
 cd external
 
-curl -sL https://github.com/PPUC/libdmdutil/archive/${LIBDMDUTIL_SHA}.tar.gz -o libdmdutil-${LIBDMDUTIL_SHA}.tar.gz
-tar xzf libdmdutil-${LIBDMDUTIL_SHA}.tar.gz
-mv libdmdutil-${LIBDMDUTIL_SHA} libdmdutil
+ppuc_prepare_dependency_source libdmdutil "${LIBDMDUTIL_SHA}" "https://github.com/PPUC/libdmdutil/archive/${LIBDMDUTIL_SHA}.tar.gz"
 cd libdmdutil
 BUILD_TYPE=${BUILD_TYPE} platforms/linux/aarch64/external.sh
 cmake \
@@ -28,8 +27,8 @@ cmake \
    -DCMAKE_BUILD_TYPE=${BUILD_TYPE} \
    -B build
 cmake --build build -- -j${NUM_PROCS}
-cp -r include/DMDUtil ../../third-party/include/
-cp -a build/libdmdutil.{so,so.*} ../../third-party/runtime-libs/linux/aarch64/
+cp -r include/DMDUtil ${PPUC_SOURCE_ROOT}/third-party/include/
+cp -a build/libdmdutil.{so,so.*} ${PPUC_SOURCE_ROOT}/third-party/runtime-libs/linux/aarch64/
 cd ..
 
 curl -sL https://github.com/libsdl-org/SDL/archive/${SDL_SHA}.tar.gz -o SDL-${SDL_SHA}.tar.gz
@@ -46,5 +45,5 @@ cmake \
 cmake --build build -- -j${NUM_PROCS}
 cd ..
 
-cp -a SDL/build/libSDL3.{so,so.*} ../third-party/runtime-libs/linux/aarch64/
-cp -r SDL/include/SDL3 ../third-party/include/
+cp -a SDL/build/libSDL3.{so,so.*} ${PPUC_SOURCE_ROOT}/third-party/runtime-libs/linux/aarch64/
+cp -r SDL/include/SDL3 ${PPUC_SOURCE_ROOT}/third-party/include/
