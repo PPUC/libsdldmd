@@ -4,6 +4,7 @@ set -e
 
 source ./platforms/config.sh
 
+export MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-${PPUC_MACOS_DEPLOYMENT_TARGET:-$(xcrun --sdk macosx --show-sdk-version 2>/dev/null || echo 14.0)}}"
 NUM_PROCS=$(sysctl -n hw.ncpu)
 
 echo "Building libraries..."
@@ -24,6 +25,8 @@ cmake \
    -DARCH=arm64 \
    -DBUILD_SHARED=ON \
    -DBUILD_STATIC=OFF \
+   -DCMAKE_OSX_ARCHITECTURES=arm64 \
+   -DCMAKE_OSX_DEPLOYMENT_TARGET=${MACOSX_DEPLOYMENT_TARGET} \
    -DCMAKE_BUILD_TYPE=${BUILD_TYPE} \
    -B build
 cmake --build build -- -j${NUM_PROCS}
@@ -41,6 +44,7 @@ cmake \
    -DSDL_TEST_LIBRARY=OFF \
    -DSDL_OPENGLES=OFF \
    -DCMAKE_OSX_ARCHITECTURES=arm64 \
+   -DCMAKE_OSX_DEPLOYMENT_TARGET=${MACOSX_DEPLOYMENT_TARGET} \
    -DCMAKE_BUILD_TYPE=${BUILD_TYPE} \
    -B build
 cmake --build build -- -j${NUM_PROCS}
