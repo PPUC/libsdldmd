@@ -7,14 +7,14 @@ source ./platforms/config.sh
 echo "Building libraries..."
 echo "  SDL_SHA: ${SDL_SHA}"
 echo "  LIBDMDUTIL_SHA: ${LIBDMDUTIL_SHA}"
-ppuc_print_dependency_source LIBDMDUTIL libdmdutil "${LIBDMDUTIL_SHA}"
+print_dependency_source LIBDMDUTIL "${LIBDMDUTIL_SHA}" LIBDMDUTIL_SOURCE_DIR
 echo ""
 
 rm -rf external
 mkdir -p external third-party/include third-party/build-libs/win/x86 third-party/runtime-libs/win/x86
 cd external
 
-ppuc_prepare_dependency_source libdmdutil "${LIBDMDUTIL_SHA}" "https://github.com/PPUC/libdmdutil/archive/${LIBDMDUTIL_SHA}.tar.gz"
+prepare_dependency_source libdmdutil "${LIBDMDUTIL_SHA}" "https://github.com/PPUC/libdmdutil/archive/${LIBDMDUTIL_SHA}.tar.gz" tar LIBDMDUTIL_SOURCE_DIR
 cd libdmdutil
 BUILD_TYPE=${BUILD_TYPE} platforms/win/x86/external.sh
 cmake \
@@ -27,9 +27,9 @@ cmake \
    -DCMAKE_BUILD_TYPE=${BUILD_TYPE} \
    -B build
 cmake --build build --config ${BUILD_TYPE}
-cp -r include/DMDUtil ${PPUC_SOURCE_ROOT}/third-party/include/
-cp build/${BUILD_TYPE}/dmdutil.lib ${PPUC_SOURCE_ROOT}/third-party/build-libs/win/x86/
-cp build/${BUILD_TYPE}/dmdutil.dll ${PPUC_SOURCE_ROOT}/third-party/runtime-libs/win/x86/
+cp -r include/DMDUtil ${PROJECT_SOURCE_ROOT}/third-party/include/
+cp build/${BUILD_TYPE}/dmdutil.lib ${PROJECT_SOURCE_ROOT}/third-party/build-libs/win/x86/
+cp build/${BUILD_TYPE}/dmdutil.dll ${PROJECT_SOURCE_ROOT}/third-party/runtime-libs/win/x86/
 cd ..
 
 curl -sL https://github.com/libsdl-org/SDL/archive/${SDL_SHA}.tar.gz -o SDL-${SDL_SHA}.tar.gz
@@ -46,6 +46,6 @@ cmake \
 cmake --build build --config ${BUILD_TYPE}
 cd ..
 
-cp SDL/build/${BUILD_TYPE}/SDL3.lib ${PPUC_SOURCE_ROOT}/third-party/build-libs/win/x86/
-cp SDL/build/${BUILD_TYPE}/SDL3.dll ${PPUC_SOURCE_ROOT}/third-party/runtime-libs/win/x86/
-cp -r SDL/include/SDL3 ${PPUC_SOURCE_ROOT}/third-party/include/
+cp SDL/build/${BUILD_TYPE}/SDL3.lib ${PROJECT_SOURCE_ROOT}/third-party/build-libs/win/x86/
+cp SDL/build/${BUILD_TYPE}/SDL3.dll ${PROJECT_SOURCE_ROOT}/third-party/runtime-libs/win/x86/
+cp -r SDL/include/SDL3 ${PROJECT_SOURCE_ROOT}/third-party/include/
