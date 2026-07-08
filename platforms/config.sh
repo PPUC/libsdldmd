@@ -3,7 +3,7 @@
 set -e
 
 SDL_SHA=f87239e71e42da91ca317a12eefb82cfbf3393eb
-LIBDMDUTIL_SHA=53b6db7b997bedbeade8e3589f43f676efeddb3d
+LIBDMDUTIL_SHA=f1dfe0db27d4daf7c06b4fa3b07304be81cd96e3
 
 PROJECT_SOURCE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 
