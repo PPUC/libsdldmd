@@ -14,7 +14,7 @@ rm -rf external
 mkdir -p external third-party/include third-party/build-libs/win/x64 third-party/runtime-libs/win/x64
 cd external
 
-prepare_dependency_source libdmdutil "${LIBDMDUTIL_SHA}" "https://github.com/PPUC/libdmdutil/archive/${LIBDMDUTIL_SHA}.tar.gz" tar LIBDMDUTIL_SOURCE_DIR
+prepare_dependency_source libdmdutil "${LIBDMDUTIL_SHA}" "https://github.com/vpinball/libdmdutil/archive/${LIBDMDUTIL_SHA}.tar.gz" tar LIBDMDUTIL_SOURCE_DIR
 cd libdmdutil
 BUILD_TYPE=${BUILD_TYPE} platforms/win/x64/external.sh
 cmake \
