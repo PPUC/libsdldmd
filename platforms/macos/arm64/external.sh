@@ -4,7 +4,12 @@ set -e
 
 source ./platforms/config.sh
 
-export MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-${PPUC_MACOS_DEPLOYMENT_TARGET:-$(xcrun --sdk macosx --show-sdk-version 2>/dev/null || echo 14.0)}}"
+# A deployment target is the OLDEST macOS a binary will run on. It must not come
+# from the SDK, which is newer than the running system whenever Xcode updates
+# first, nor from the running system, which makes the result unportable and makes
+# a tree hold libraries built for several targets at once. PPUC pins the same
+# floor and exports it when it drives this script.
+export MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-${PPUC_MACOS_DEPLOYMENT_TARGET:-14.0}}"
 NUM_PROCS=$(sysctl -n hw.ncpu)
 
 echo "Building libraries..."
