@@ -2,7 +2,15 @@
 
 set -e
 
-SDL_SHA=fa2c02bb6e21974a89ea9824bc53c9932abe5f9c
+# Overridable, because an embedding host has to win.
+#
+# libsdldmd renders a DMD through SDL, and a host that embeds it links SDL too.
+# If the two fetch different revisions there are two SDL3 libraries in one
+# process, which is not a thing that fails cleanly. So the host passes the
+# revision it is building everything else against -- ppuc takes vpinball's,
+# since vpinball's plugins run in the same process -- and this value is only
+# the default for building libsdldmd on its own.
+SDL_SHA="${SDL_SHA:-fa2c02bb6e21974a89ea9824bc53c9932abe5f9c}"
 LIBDMDUTIL_SHA=68e4de8a70d774e44f972fc638e689ba5b93c2ac
 
 PROJECT_SOURCE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
