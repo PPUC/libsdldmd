@@ -11,7 +11,7 @@ set -e
 # since vpinball's plugins run in the same process -- and this value is only
 # the default for building libsdldmd on its own.
 SDL_SHA="${SDL_SHA:-fa2c02bb6e21974a89ea9824bc53c9932abe5f9c}"
-LIBDMDUTIL_SHA=68e4de8a70d774e44f972fc638e689ba5b93c2ac
+LIBDMDUTIL_SHA=6bd819c97c6918bd0fc799d2f2eb2dfa73008a00
 
 PROJECT_SOURCE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 
