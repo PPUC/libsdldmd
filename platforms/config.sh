@@ -10,7 +10,7 @@ set -e
 # revision it is building everything else against -- ppuc takes vpinball's,
 # since vpinball's plugins run in the same process -- and this value is only
 # the default for building libsdldmd on its own.
-SDL_SHA="${SDL_SHA:-fa2c02bb6e21974a89ea9824bc53c9932abe5f9c}"
+SDL_SHA="${SDL_SHA:-829a65d769d935c4852f8159e964312c0957260a}"
 LIBDMDUTIL_SHA=6bd819c97c6918bd0fc799d2f2eb2dfa73008a00
 
 PROJECT_SOURCE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
