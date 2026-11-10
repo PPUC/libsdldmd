@@ -97,14 +97,26 @@ class SDLDMD : public RGB24DMD
   bool m_framePending = false;
   std::vector<uint8_t> m_renderFrame;
 
+  // What was asked for, in window coordinates relative to the screen. Where
+  // the window really is that size, as on a desktop, the DMD fills it. Where
+  // it is not - fullscreen, or KMS/DRM, which cannot size or place a window at
+  // all - the DMD is drawn into this rectangle of the screen instead.
+  int m_requestedWidth = 0;
+  int m_requestedHeight = 0;
+  int m_requestedX = SDL_WINDOWPOS_UNDEFINED;
+  int m_requestedY = SDL_WINDOWPOS_UNDEFINED;
+
   bool CreateRendererWithFallbacks();
-  void RenderDots(uint8_t* pData, uint16_t width, uint16_t height);
-  void RenderSquares(uint8_t* pData, uint16_t width, uint16_t height);
-  void RenderScaledDots(uint8_t* pData, uint16_t width, uint16_t height, int scaleFactor);
-  void RenderScaledSquares(uint8_t* pData, uint16_t width, uint16_t height, int scaleFactor);
-  void RenderScaledNearest(uint8_t* pData, uint16_t width, uint16_t height, int scaleFactor);
-  void RenderSmoothScaling(uint8_t* pData, uint16_t width, uint16_t height);
-  void RenderXBRZ(uint8_t* pData, uint16_t width, uint16_t height);
+  SDL_FRect GetTargetRect(uint16_t width, uint16_t height) const;
+  void RenderDots(uint8_t* pData, uint16_t width, uint16_t height, const SDL_FRect& target);
+  void RenderSquares(uint8_t* pData, uint16_t width, uint16_t height, const SDL_FRect& target);
+  void RenderScaledDots(uint8_t* pData, uint16_t width, uint16_t height, int scaleFactor, const SDL_FRect& target);
+  void RenderScaledSquares(uint8_t* pData, uint16_t width, uint16_t height, int scaleFactor,
+                           const SDL_FRect& target);
+  void RenderScaledNearest(uint8_t* pData, uint16_t width, uint16_t height, int scaleFactor,
+                           const SDL_FRect& target);
+  void RenderSmoothScaling(uint8_t* pData, uint16_t width, uint16_t height, const SDL_FRect& target);
+  void RenderXBRZ(uint8_t* pData, uint16_t width, uint16_t height, const SDL_FRect& target);
 };
 
 SDLDMDAPI SDLDMD* CreateSDLDMD(DMD& dmd, const char* title, uint16_t windowWidth, uint16_t windowHeight,

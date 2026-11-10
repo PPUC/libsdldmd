@@ -189,7 +189,14 @@ SDLDMD::SDLDMD(const char* title, uint16_t windowWidth, uint16_t windowHeight, u
                uint16_t height, int screenIndex, int windowX, int windowY, RenderingMode renderingMode,
                Rotation rotation,
                const char* preferredVideoDriver)
-    : RGB24DMD(width, height), m_pRenderer(nullptr), m_renderingMode(renderingMode), m_rotation(rotation)
+    : RGB24DMD(width, height),
+      m_pRenderer(nullptr),
+      m_renderingMode(renderingMode),
+      m_rotation(rotation),
+      m_requestedWidth(windowWidth),
+      m_requestedHeight(windowHeight),
+      m_requestedX(windowX),
+      m_requestedY(windowY)
 {
   {
     std::lock_guard<std::mutex> lock(g_sdldmdSdlMutex);
@@ -588,67 +595,129 @@ bool SDLDMD::Render()
   uint16_t renderHeight = m_height;
   RotateFrameIfNeeded(m_renderFrame.data(), m_width, m_height, &pRenderData, &renderWidth, &renderHeight);
 
-  switch (m_renderingMode)
-  {
-    case RenderingMode::Square:
-      RenderSquares(pRenderData, renderWidth, renderHeight);
-      break;
+  const SDL_FRect target = GetTargetRect(renderWidth, renderHeight);
 
-    case RenderingMode::Scale2x:
-      RenderScaledNearest(pRenderData, renderWidth, renderHeight, 2);
-      break;
-
-    case RenderingMode::Scale4x:
-      RenderScaledNearest(pRenderData, renderWidth, renderHeight, 4);
-      break;
-
-    case RenderingMode::Scale2xDots:
-      RenderScaledDots(pRenderData, renderWidth, renderHeight, 2);
-      break;
-
-    case RenderingMode::Scale4xDots:
-      RenderScaledDots(pRenderData, renderWidth, renderHeight, 4);
-      break;
-
-    case RenderingMode::Scale2xSquares:
-      RenderScaledSquares(pRenderData, renderWidth, renderHeight, 2);
-      break;
-
-    case RenderingMode::Scale4xSquares:
-      RenderScaledSquares(pRenderData, renderWidth, renderHeight, 4);
-      break;
-
-    case RenderingMode::SmoothScaling:
-      RenderSmoothScaling(pRenderData, renderWidth, renderHeight);
-      break;
-
-    case RenderingMode::XBRZ:
-      RenderXBRZ(pRenderData, renderWidth, renderHeight);
-      break;
-
-    default:
-      RenderDots(pRenderData, renderWidth, renderHeight);
-      break;
-  }
-
-  return true;
-}
-
-void SDLDMD::RenderDots(uint8_t* pData, uint16_t width, uint16_t height)
-{
-  int windowWidth = 0;
-  int windowHeight = 0;
-  SDL_GetRenderOutputSize(m_pRenderer, &windowWidth, &windowHeight);
-
-  float pixelWidth = (float)windowWidth / width;
-  float pixelRadius = pixelWidth / 2.0f;
-
+  // Everything outside the DMD is black, every frame: KMS/DRM flips between
+  // buffers, and a margin left uncleared shows whatever the other one held.
   SDL_SetRenderDrawColor(m_pRenderer, 0, 0, 0, 255);
   SDL_RenderClear(m_pRenderer);
 
+  switch (m_renderingMode)
+  {
+    case RenderingMode::Square:
+      RenderSquares(pRenderData, renderWidth, renderHeight, target);
+      break;
+
+    case RenderingMode::Scale2x:
+      RenderScaledNearest(pRenderData, renderWidth, renderHeight, 2, target);
+      break;
+
+    case RenderingMode::Scale4x:
+      RenderScaledNearest(pRenderData, renderWidth, renderHeight, 4, target);
+      break;
+
+    case RenderingMode::Scale2xDots:
+      RenderScaledDots(pRenderData, renderWidth, renderHeight, 2, target);
+      break;
+
+    case RenderingMode::Scale4xDots:
+      RenderScaledDots(pRenderData, renderWidth, renderHeight, 4, target);
+      break;
+
+    case RenderingMode::Scale2xSquares:
+      RenderScaledSquares(pRenderData, renderWidth, renderHeight, 2, target);
+      break;
+
+    case RenderingMode::Scale4xSquares:
+      RenderScaledSquares(pRenderData, renderWidth, renderHeight, 4, target);
+      break;
+
+    case RenderingMode::SmoothScaling:
+      RenderSmoothScaling(pRenderData, renderWidth, renderHeight, target);
+      break;
+
+    case RenderingMode::XBRZ:
+      RenderXBRZ(pRenderData, renderWidth, renderHeight, target);
+      break;
+
+    default:
+      RenderDots(pRenderData, renderWidth, renderHeight, target);
+      break;
+  }
+
+  SDL_RenderPresent(m_pRenderer);
+  return true;
+}
+
+// The rectangle of the output the DMD is drawn into, in output pixels.
+//
+// First the area: the whole output when the window is the size that was asked
+// for, otherwise the requested rectangle of the screen. Then the DMD itself,
+// as large as fits in that area without changing its aspect ratio, centred in
+// it. Stretching it to the area is never right: a 128x32 DMD on a 16:9 screen
+// came out three times too tall.
+SDL_FRect SDLDMD::GetTargetRect(uint16_t width, uint16_t height) const
+{
+  int outputWidth = 0;
+  int outputHeight = 0;
+  SDL_GetCurrentRenderOutputSize(m_pRenderer, &outputWidth, &outputHeight);
+
+  int windowWidth = 0;
+  int windowHeight = 0;
+  SDL_GetWindowSize(m_pWindow, &windowWidth, &windowHeight);
+
+  SDL_FRect area = {0.0f, 0.0f, static_cast<float>(outputWidth), static_cast<float>(outputHeight)};
+
+  const bool windowIsAsRequested = windowWidth == m_requestedWidth && windowHeight == m_requestedHeight;
+  if (!windowIsAsRequested && windowWidth > 0 && windowHeight > 0 && m_requestedWidth > 0 &&
+      m_requestedHeight > 0)
+  {
+    // Requested in window coordinates; the output may have more pixels than
+    // that on a high-density display.
+    const float scaleX = static_cast<float>(outputWidth) / windowWidth;
+    const float scaleY = static_cast<float>(outputHeight) / windowHeight;
+    const float requestedWidth = m_requestedWidth * scaleX;
+    const float requestedHeight = m_requestedHeight * scaleY;
+
+    // No position means centred, as a window without one would be.
+    const bool centreX = SDL_WINDOWPOS_ISUNDEFINED(m_requestedX) || SDL_WINDOWPOS_ISCENTERED(m_requestedX);
+    const bool centreY = SDL_WINDOWPOS_ISUNDEFINED(m_requestedY) || SDL_WINDOWPOS_ISCENTERED(m_requestedY);
+    const float requestedX = centreX ? (outputWidth - requestedWidth) / 2.0f : m_requestedX * scaleX;
+    const float requestedY = centreY ? (outputHeight - requestedHeight) / 2.0f : m_requestedY * scaleY;
+
+    // Clipped to the screen. A rectangle entirely off it is a configuration
+    // mistake, and filling the screen shows that something is wrong far
+    // better than drawing nothing would.
+    const float left = std::max(0.0f, requestedX);
+    const float top = std::max(0.0f, requestedY);
+    const float right = std::min(static_cast<float>(outputWidth), requestedX + requestedWidth);
+    const float bottom = std::min(static_cast<float>(outputHeight), requestedY + requestedHeight);
+    if (right > left && bottom > top)
+    {
+      area = {left, top, right - left, bottom - top};
+    }
+  }
+
+  if (width == 0 || height == 0 || area.w <= 0.0f || area.h <= 0.0f)
+  {
+    return area;
+  }
+
+  const float scale = std::min(area.w / width, area.h / height);
+  const float targetWidth = width * scale;
+  const float targetHeight = height * scale;
+  return {area.x + (area.w - targetWidth) / 2.0f, area.y + (area.h - targetHeight) / 2.0f, targetWidth,
+          targetHeight};
+}
+
+void SDLDMD::RenderDots(uint8_t* pData, uint16_t width, uint16_t height, const SDL_FRect& target)
+{
+  const float pixelWidth = target.w / width;
+  const float pixelRadius = pixelWidth / 2.0f;
+
   for (int y = 0; y < height; y++)
   {
-    float centerY = y * pixelWidth + pixelWidth / 2.0f;
+    float centerY = target.y + y * pixelWidth + pixelWidth / 2.0f;
 
     for (int x = 0; x < width; x++)
     {
@@ -659,7 +728,7 @@ void SDLDMD::RenderDots(uint8_t* pData, uint16_t width, uint16_t height)
 
       if (r == 0 && g == 0 && b == 0) continue;
 
-      float centerX = x * pixelWidth + pixelWidth / 2.0f;
+      float centerX = target.x + x * pixelWidth + pixelWidth / 2.0f;
 
       SDL_SetRenderDrawColor(m_pRenderer, r, g, b, 255);
 
@@ -679,11 +748,10 @@ void SDLDMD::RenderDots(uint8_t* pData, uint16_t width, uint16_t height)
       }
     }
   }
-
-  SDL_RenderPresent(m_pRenderer);
 }
 
-void SDLDMD::RenderScaledDots(uint8_t* pData, uint16_t width, uint16_t height, int scaleFactor)
+void SDLDMD::RenderScaledDots(uint8_t* pData, uint16_t width, uint16_t height, int scaleFactor,
+                              const SDL_FRect& target)
 {
   const uint16_t scaledWidth = static_cast<uint16_t>(width * scaleFactor);
   const uint16_t scaledHeight = static_cast<uint16_t>(height * scaleFactor);
@@ -709,10 +777,11 @@ void SDLDMD::RenderScaledDots(uint8_t* pData, uint16_t width, uint16_t height, i
     }
   }
 
-  RenderDots(scaledBuffer.data(), scaledWidth, scaledHeight);
+  RenderDots(scaledBuffer.data(), scaledWidth, scaledHeight, target);
 }
 
-void SDLDMD::RenderScaledSquares(uint8_t* pData, uint16_t width, uint16_t height, int scaleFactor)
+void SDLDMD::RenderScaledSquares(uint8_t* pData, uint16_t width, uint16_t height, int scaleFactor,
+                                 const SDL_FRect& target)
 {
   const uint16_t scaledWidth = static_cast<uint16_t>(width * scaleFactor);
   const uint16_t scaledHeight = static_cast<uint16_t>(height * scaleFactor);
@@ -738,20 +807,13 @@ void SDLDMD::RenderScaledSquares(uint8_t* pData, uint16_t width, uint16_t height
     }
   }
 
-  RenderSquares(scaledBuffer.data(), scaledWidth, scaledHeight);
+  RenderSquares(scaledBuffer.data(), scaledWidth, scaledHeight, target);
 }
 
-void SDLDMD::RenderSquares(uint8_t* pData, uint16_t width, uint16_t height)
+void SDLDMD::RenderSquares(uint8_t* pData, uint16_t width, uint16_t height, const SDL_FRect& target)
 {
-  int windowWidth = 0;
-  int windowHeight = 0;
-  SDL_GetRenderOutputSize(m_pRenderer, &windowWidth, &windowHeight);
-
-  const float pixelWidth = static_cast<float>(windowWidth) / width;
-  const float pixelHeight = static_cast<float>(windowHeight) / height;
-
-  SDL_SetRenderDrawColor(m_pRenderer, 0, 0, 0, 255);
-  SDL_RenderClear(m_pRenderer);
+  const float pixelWidth = target.w / width;
+  const float pixelHeight = target.h / height;
 
   for (int y = 0; y < height; ++y)
   {
@@ -767,8 +829,8 @@ void SDLDMD::RenderSquares(uint8_t* pData, uint16_t width, uint16_t height)
       SDL_SetRenderDrawColor(m_pRenderer, r, g, b, 255);
 
       SDL_FRect rect = {
-          x * pixelWidth,
-          y * pixelHeight,
+          target.x + x * pixelWidth,
+          target.y + y * pixelHeight,
           pixelWidth,
           pixelHeight,
       };
@@ -786,16 +848,11 @@ void SDLDMD::RenderSquares(uint8_t* pData, uint16_t width, uint16_t height)
       SDL_RenderFillRect(m_pRenderer, &rect);
     }
   }
-
-  SDL_RenderPresent(m_pRenderer);
 }
 
-void SDLDMD::RenderScaledNearest(uint8_t* pData, uint16_t width, uint16_t height, int scaleFactor)
+void SDLDMD::RenderScaledNearest(uint8_t* pData, uint16_t width, uint16_t height, int scaleFactor,
+                                 const SDL_FRect& target)
 {
-  int windowWidth = 0;
-  int windowHeight = 0;
-  SDL_GetRenderOutputSize(m_pRenderer, &windowWidth, &windowHeight);
-
   SDL_Texture* srcTexture =
       SDL_CreateTexture(m_pRenderer, SDL_PIXELFORMAT_RGB24, SDL_TEXTUREACCESS_STATIC, width, height);
   SDL_UpdateTexture(srcTexture, nullptr, pData, width * 3);
@@ -813,22 +870,14 @@ void SDLDMD::RenderScaledNearest(uint8_t* pData, uint16_t width, uint16_t height
 
   SDL_SetRenderTarget(m_pRenderer, nullptr);
   SDL_SetTextureScaleMode(intermediate, SDL_SCALEMODE_NEAREST);
-  SDL_SetRenderDrawColor(m_pRenderer, 0, 0, 0, 255);
-  SDL_RenderClear(m_pRenderer);
-  SDL_FRect dest = {0.0f, 0.0f, static_cast<float>(windowWidth), static_cast<float>(windowHeight)};
-  SDL_RenderTexture(m_pRenderer, intermediate, nullptr, &dest);
-  SDL_RenderPresent(m_pRenderer);
+  SDL_RenderTexture(m_pRenderer, intermediate, nullptr, &target);
 
   SDL_DestroyTexture(intermediate);
   SDL_DestroyTexture(srcTexture);
 }
 
-void SDLDMD::RenderSmoothScaling(uint8_t* pData, uint16_t width, uint16_t height)
+void SDLDMD::RenderSmoothScaling(uint8_t* pData, uint16_t width, uint16_t height, const SDL_FRect& target)
 {
-  int windowWidth = 0;
-  int windowHeight = 0;
-  SDL_GetRenderOutputSize(m_pRenderer, &windowWidth, &windowHeight);
-
   SDL_Texture* srcTexture =
       SDL_CreateTexture(m_pRenderer, SDL_PIXELFORMAT_RGB24, SDL_TEXTUREACCESS_STATIC, width, height);
   SDL_UpdateTexture(srcTexture, nullptr, pData, width * 3);
@@ -844,21 +893,14 @@ void SDLDMD::RenderSmoothScaling(uint8_t* pData, uint16_t width, uint16_t height
 
   SDL_SetRenderTarget(m_pRenderer, nullptr);
   SDL_SetTextureScaleMode(intermediate, SDL_SCALEMODE_LINEAR);
-  SDL_FRect dest = {0.0f, 0.0f, (float)windowWidth, (float)windowHeight};
-  SDL_RenderTexture(m_pRenderer, intermediate, nullptr, &dest);
-
-  SDL_RenderPresent(m_pRenderer);
+  SDL_RenderTexture(m_pRenderer, intermediate, nullptr, &target);
 
   SDL_DestroyTexture(srcTexture);
   SDL_DestroyTexture(intermediate);
 }
 
-void SDLDMD::RenderXBRZ(uint8_t* pData, uint16_t width, uint16_t height)
+void SDLDMD::RenderXBRZ(uint8_t* pData, uint16_t width, uint16_t height, const SDL_FRect& target)
 {
-  int windowWidth = 0;
-  int windowHeight = 0;
-  SDL_GetRenderOutputSize(m_pRenderer, &windowWidth, &windowHeight);
-
   const int srcWidth = width;
   const int srcHeight = height;
   std::vector<uint32_t> srcImage(srcWidth * srcHeight);
@@ -896,12 +938,7 @@ void SDLDMD::RenderXBRZ(uint8_t* pData, uint16_t width, uint16_t height)
 
   SDL_UpdateTexture(texture, nullptr, dstImage.data(), scaledWidth * sizeof(uint32_t));
 
-  SDL_RenderClear(m_pRenderer);
-
-  SDL_FRect dstRect = {0.0f, 0.0f, (float)windowWidth, (float)windowHeight};
-  SDL_RenderTexture(m_pRenderer, texture, nullptr, &dstRect);
-
-  SDL_RenderPresent(m_pRenderer);
+  SDL_RenderTexture(m_pRenderer, texture, nullptr, &target);
 
   SDL_DestroyTexture(texture);
 }
