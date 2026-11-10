@@ -563,13 +563,30 @@ void SDLDMD::RotateFrameIfNeeded(uint8_t* pData, uint16_t width, uint16_t height
 
 void SDLDMD::Update(uint8_t* pData, uint16_t width, uint16_t height)
 {
+  std::lock_guard<std::mutex> lock(m_frameMutex);
   RGB24DMD::Update(pData, width, height);
   if (!m_update) return;
+  m_update = false;
 
-  uint8_t* pRenderData = m_pData;
+  m_pendingFrame.assign(m_pData, m_pData + m_length);
+  m_framePending = true;
+}
+
+bool SDLDMD::Render()
+{
+  if (!m_pRenderer) return false;
+
+  {
+    std::lock_guard<std::mutex> lock(m_frameMutex);
+    if (!m_framePending) return false;
+    m_framePending = false;
+    m_renderFrame.swap(m_pendingFrame);
+  }
+
+  uint8_t* pRenderData = m_renderFrame.data();
   uint16_t renderWidth = m_width;
   uint16_t renderHeight = m_height;
-  RotateFrameIfNeeded(m_pData, m_width, m_height, &pRenderData, &renderWidth, &renderHeight);
+  RotateFrameIfNeeded(m_renderFrame.data(), m_width, m_height, &pRenderData, &renderWidth, &renderHeight);
 
   switch (m_renderingMode)
   {
@@ -613,6 +630,8 @@ void SDLDMD::Update(uint8_t* pData, uint16_t width, uint16_t height)
       RenderDots(pRenderData, renderWidth, renderHeight);
       break;
   }
+
+  return true;
 }
 
 void SDLDMD::RenderDots(uint8_t* pData, uint16_t width, uint16_t height)

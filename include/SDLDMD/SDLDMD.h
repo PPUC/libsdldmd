@@ -1,7 +1,7 @@
 #pragma once
 
 #define SDLDMD_VERSION_MAJOR 0
-#define SDLDMD_VERSION_MINOR 1
+#define SDLDMD_VERSION_MINOR 2
 #define SDLDMD_VERSION_PATCH 0
 
 #ifdef _MSC_VER
@@ -11,6 +11,7 @@
 #endif
 
 #include <cstdint>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -56,7 +57,19 @@ class SDLDMD : public RGB24DMD
 
   ~SDLDMD() override;
 
+  // Called by libdmdutil from its own output thread. It only keeps the newest
+  // frame: the window and its GL context belong to the thread that created
+  // them, and drawing from any other thread fails without a word on KMS/DRM
+  // with OpenGL ES, which left a Raspberry Pi's screen showing whatever was on
+  // it before.
   void Update(uint8_t* pData, uint16_t width = 0, uint16_t height = 0) override;
+
+  // Draws and presents the newest frame, if one arrived since the last call.
+  // Must be called on the thread that created this SDLDMD, as often as frames
+  // should appear - typically once per pass of the application's main loop.
+  // Returns true when a frame was presented.
+  SDLDMDAPI bool Render();
+
 
   void SetRenderingMode(RenderingMode mode) { m_renderingMode = mode; }
   bool IsReady() const { return m_pRenderer != nullptr; }
@@ -76,6 +89,13 @@ class SDLDMD : public RGB24DMD
   bool m_managesSDLVideo = false;
   bool m_registeredSDLInstance = false;
   std::vector<uint8_t> m_rotatedBuffer;
+
+  // The frame handed over by Update(), guarded by m_frameMutex. Render() copies
+  // it out before drawing, so the output thread never waits for a present.
+  std::mutex m_frameMutex;
+  std::vector<uint8_t> m_pendingFrame;
+  bool m_framePending = false;
+  std::vector<uint8_t> m_renderFrame;
 
   bool CreateRendererWithFallbacks();
   void RenderDots(uint8_t* pData, uint16_t width, uint16_t height);
