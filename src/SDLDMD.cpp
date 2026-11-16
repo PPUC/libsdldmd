@@ -267,6 +267,10 @@ SDLDMD::SDLDMD(const char* title, uint16_t windowWidth, uint16_t windowHeight, u
 
 SDLDMD::~SDLDMD()
 {
+  if (m_pFrameTexture) SDL_DestroyTexture(m_pFrameTexture);
+  if (m_pDotMask) SDL_DestroyTexture(m_pDotMask);
+  m_pFrameTexture = nullptr;
+  m_pDotMask = nullptr;
   if (m_pRenderer) SDL_DestroyRenderer(m_pRenderer);
   if (m_pWindow) SDL_DestroyWindow(m_pWindow);
   m_pRenderer = nullptr;
@@ -710,44 +714,87 @@ SDL_FRect SDLDMD::GetTargetRect(uint16_t width, uint16_t height) const
           targetHeight};
 }
 
-void SDLDMD::RenderDots(uint8_t* pData, uint16_t width, uint16_t height, const SDL_FRect& target)
+// The frame as a texture at its own resolution, created once per size.
+bool SDLDMD::EnsureFrameTexture(uint16_t width, uint16_t height)
 {
-  const float pixelWidth = target.w / width;
-  const float pixelRadius = pixelWidth / 2.0f;
+  if (m_pFrameTexture && m_frameTextureWidth == width && m_frameTextureHeight == height) return true;
+  if (m_pFrameTexture) SDL_DestroyTexture(m_pFrameTexture);
+  m_pFrameTexture =
+      SDL_CreateTexture(m_pRenderer, SDL_PIXELFORMAT_RGB24, SDL_TEXTUREACCESS_STREAMING, width, height);
+  if (!m_pFrameTexture) return false;
+  SDL_SetTextureScaleMode(m_pFrameTexture, SDL_SCALEMODE_NEAREST);
+  m_frameTextureWidth = width;
+  m_frameTextureHeight = height;
+  return true;
+}
 
-  for (int y = 0; y < height; y++)
+// Black everywhere but a round hole per dot, `cell` output pixels to a dot.
+// The same circle the per-pixel drawing used: radius cell / 2, rounded down,
+// centred on the cell's middle pixel.
+bool SDLDMD::EnsureDotMask(uint16_t width, uint16_t height, int cell)
+{
+  if (m_pDotMask && m_dotMaskWidth == width && m_dotMaskHeight == height && m_dotMaskCell == cell) return true;
+  if (m_pDotMask) SDL_DestroyTexture(m_pDotMask);
+  m_pDotMask = nullptr;
+
+  const int maskWidth = width * cell;
+  const int maskHeight = height * cell;
+  std::vector<uint8_t> cellAlpha(static_cast<size_t>(cell) * cell);
+  const int radius = cell / 2;
+  const int centre = static_cast<int>(cell / 2.0f);
+  for (int y = 0; y < cell; ++y)
   {
-    float centerY = target.y + y * pixelWidth + pixelWidth / 2.0f;
-
-    for (int x = 0; x < width; x++)
+    for (int x = 0; x < cell; ++x)
     {
-      int idx = (y * width + x) * 3;
-      uint8_t r = pData[idx];
-      uint8_t g = pData[idx + 1];
-      uint8_t b = pData[idx + 2];
-
-      if (r == 0 && g == 0 && b == 0) continue;
-
-      float centerX = target.x + x * pixelWidth + pixelWidth / 2.0f;
-
-      SDL_SetRenderDrawColor(m_pRenderer, r, g, b, 255);
-
-      int radius = (int)pixelRadius;
-      int centerXi = (int)centerX;
-      int centerYi = (int)centerY;
-
-      for (int dy = -radius; dy <= radius; dy++)
-      {
-        for (int dx = -radius; dx <= radius; dx++)
-        {
-          if (dx * dx + dy * dy <= radius * radius)
-          {
-            SDL_RenderPoint(m_pRenderer, centerXi + dx, centerYi + dy);
-          }
-        }
-      }
+      const int dx = x - centre;
+      const int dy = y - centre;
+      cellAlpha[static_cast<size_t>(y) * cell + x] = dx * dx + dy * dy <= radius * radius ? 0 : 255;
     }
   }
+
+  std::vector<uint8_t> pixels(static_cast<size_t>(maskWidth) * maskHeight * 4u, 0);
+  for (int y = 0; y < maskHeight; ++y)
+  {
+    const uint8_t* rowAlpha = &cellAlpha[static_cast<size_t>(y % cell) * cell];
+    uint8_t* row = &pixels[static_cast<size_t>(y) * maskWidth * 4u];
+    for (int x = 0; x < maskWidth; ++x)
+    {
+      row[x * 4 + 3] = rowAlpha[x % cell];
+    }
+  }
+
+  m_pDotMask = SDL_CreateTexture(m_pRenderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STATIC, maskWidth, maskHeight);
+  if (!m_pDotMask) return false;
+  SDL_UpdateTexture(m_pDotMask, nullptr, pixels.data(), maskWidth * 4);
+  SDL_SetTextureBlendMode(m_pDotMask, SDL_BLENDMODE_BLEND);
+  SDL_SetTextureScaleMode(m_pDotMask, SDL_SCALEMODE_NEAREST);
+  m_dotMaskWidth = width;
+  m_dotMaskHeight = height;
+  m_dotMaskCell = cell;
+  return true;
+}
+
+// Each pixel of the frame as a round dot.
+//
+// This used to draw every dot point by point: one SDL_RenderPoint per output
+// pixel of every lit dot, some 150 for a dot at 1920x480 and up to 600000 a
+// frame. That was tolerable on libdmdutil's own thread, but the DMD is drawn
+// from ppuc's main loop now, which also runs the lamps, the rules and the
+// switch holds, and a busy animation stalled all of them. Now it is two draws:
+// the frame scaled up to the target without smoothing, and over it a mask,
+// built once per size, that is black except for a round hole per dot.
+void SDLDMD::RenderDots(uint8_t* pData, uint16_t width, uint16_t height, const SDL_FRect& target)
+{
+  if (width == 0 || height == 0) return;
+  // Rounded down, as the dot radius always was.
+  const int cell = std::max(2, static_cast<int>(target.w / width));
+  if (!EnsureFrameTexture(width, height) || !EnsureDotMask(width, height, cell))
+  {
+    return;
+  }
+  SDL_UpdateTexture(m_pFrameTexture, nullptr, pData, width * 3);
+  SDL_RenderTexture(m_pRenderer, m_pFrameTexture, nullptr, &target);
+  SDL_RenderTexture(m_pRenderer, m_pDotMask, nullptr, &target);
 }
 
 void SDLDMD::RenderScaledDots(uint8_t* pData, uint16_t width, uint16_t height, int scaleFactor,

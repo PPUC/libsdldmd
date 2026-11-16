@@ -82,6 +82,15 @@ class SDLDMD : public RGB24DMD
                            uint16_t* pRenderHeight);
   SDL_Window* m_pWindow = nullptr;
   SDL_Renderer* m_pRenderer;
+  // Kept between frames for the dot renderer, see RenderDots(): the frame at
+  // its own resolution, and the mask that turns its pixels into dots.
+  SDL_Texture* m_pFrameTexture = nullptr;
+  uint16_t m_frameTextureWidth = 0;
+  uint16_t m_frameTextureHeight = 0;
+  SDL_Texture* m_pDotMask = nullptr;
+  uint16_t m_dotMaskWidth = 0;
+  uint16_t m_dotMaskHeight = 0;
+  int m_dotMaskCell = 0;
   std::string m_error;
   std::string m_rendererName;
   int m_renderingMode = RenderingMode::Dots;
@@ -109,6 +118,8 @@ class SDLDMD : public RGB24DMD
   bool CreateRendererWithFallbacks();
   SDL_FRect GetTargetRect(uint16_t width, uint16_t height) const;
   void RenderDots(uint8_t* pData, uint16_t width, uint16_t height, const SDL_FRect& target);
+  bool EnsureFrameTexture(uint16_t width, uint16_t height);
+  bool EnsureDotMask(uint16_t width, uint16_t height, int cell);
   void RenderSquares(uint8_t* pData, uint16_t width, uint16_t height, const SDL_FRect& target);
   void RenderScaledDots(uint8_t* pData, uint16_t width, uint16_t height, int scaleFactor, const SDL_FRect& target);
   void RenderScaledSquares(uint8_t* pData, uint16_t width, uint16_t height, int scaleFactor,
