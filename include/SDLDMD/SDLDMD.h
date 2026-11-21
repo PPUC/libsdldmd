@@ -1,7 +1,7 @@
 #pragma once
 
 #define SDLDMD_VERSION_MAJOR 0
-#define SDLDMD_VERSION_MINOR 2
+#define SDLDMD_VERSION_MINOR 3
 #define SDLDMD_VERSION_PATCH 0
 
 #ifdef _MSC_VER
@@ -10,16 +10,15 @@
 #define SDLDMDAPI __attribute__((visibility("default")))
 #endif
 
+#include <SDL3/SDL.h>
+
 #include <cstdint>
 #include <mutex>
 #include <string>
 #include <vector>
 
-#include <SDL3/SDL.h>
-
 #include "DMDUtil/DMD.h"
 #include "DMDUtil/RGB24DMD.h"
-
 #include "SDLDMD/SDLDMDConfig.h"
 
 namespace DMDUtil
@@ -51,9 +50,8 @@ class SDLDMD : public RGB24DMD
 
   SDLDMD(const char* title, uint16_t windowWidth, uint16_t windowHeight, uint32_t windowFlags, uint16_t width,
          uint16_t height, int screenIndex = -1, int windowX = SDL_WINDOWPOS_UNDEFINED,
-         int windowY = SDL_WINDOWPOS_UNDEFINED,
-         RenderingMode renderingMode = RenderingMode::Dots, Rotation rotation = Rotation::Rotate0,
-         const char* preferredVideoDriver = nullptr);
+         int windowY = SDL_WINDOWPOS_UNDEFINED, RenderingMode renderingMode = RenderingMode::Dots,
+         Rotation rotation = Rotation::Rotate0, const char* preferredVideoDriver = nullptr);
 
   ~SDLDMD() override;
 
@@ -70,7 +68,6 @@ class SDLDMD : public RGB24DMD
   // Returns true when a frame was presented.
   SDLDMDAPI bool Render();
 
-
   void SetRenderingMode(RenderingMode mode) { m_renderingMode = mode; }
   bool IsReady() const { return m_pRenderer != nullptr; }
   const char* GetError() const { return m_error.c_str(); }
@@ -78,19 +75,37 @@ class SDLDMD : public RGB24DMD
   bool IsHardwareAccelerated() const { return !m_rendererName.empty() && m_rendererName != "software"; }
 
  private:
-  void RotateFrameIfNeeded(uint8_t* pData, uint16_t width, uint16_t height, uint8_t** ppRenderData, uint16_t* pRenderWidth,
-                           uint16_t* pRenderHeight);
+  void RotateFrameIfNeeded(uint8_t* pData, uint16_t width, uint16_t height, uint8_t** ppRenderData,
+                           uint16_t* pRenderWidth, uint16_t* pRenderHeight);
   SDL_Window* m_pWindow = nullptr;
   SDL_Renderer* m_pRenderer;
-  // Kept between frames for the dot renderer, see RenderDots(): the frame at
-  // its own resolution, and the mask that turns its pixels into dots.
+  // Kept between frames, created again only when a size changes: the frame at
+  // its own resolution, the mask that turns its pixels into dots or squares,
+  // the render target of the scaled modes, and xBRZ's buffers and texture.
   SDL_Texture* m_pFrameTexture = nullptr;
   uint16_t m_frameTextureWidth = 0;
   uint16_t m_frameTextureHeight = 0;
-  SDL_Texture* m_pDotMask = nullptr;
-  uint16_t m_dotMaskWidth = 0;
-  uint16_t m_dotMaskHeight = 0;
-  int m_dotMaskCell = 0;
+  enum class MaskShape
+  {
+    Dot,
+    Square,
+  };
+  SDL_Texture* m_pMask = nullptr;
+  uint16_t m_maskGridWidth = 0;
+  uint16_t m_maskGridHeight = 0;
+  int m_maskWidth = 0;
+  int m_maskHeight = 0;
+  MaskShape m_maskShape = MaskShape::Dot;
+  SDL_Texture* m_pIntermediate = nullptr;
+  int m_intermediateWidth = 0;
+  int m_intermediateHeight = 0;
+  SDL_Texture* m_pXbrzTexture = nullptr;
+  int m_xbrzTextureWidth = 0;
+  int m_xbrzTextureHeight = 0;
+  std::vector<SDL_Vertex> m_squareVertices;
+  std::vector<int> m_squareIndices;
+  std::vector<uint32_t> m_xbrzSource;
+  std::vector<uint32_t> m_xbrzScaled;
   std::string m_error;
   std::string m_rendererName;
   int m_renderingMode = RenderingMode::Dots;
@@ -117,35 +132,29 @@ class SDLDMD : public RGB24DMD
 
   bool CreateRendererWithFallbacks();
   SDL_FRect GetTargetRect(uint16_t width, uint16_t height) const;
-  void RenderDots(uint8_t* pData, uint16_t width, uint16_t height, const SDL_FRect& target);
   bool EnsureFrameTexture(uint16_t width, uint16_t height);
-  bool EnsureDotMask(uint16_t width, uint16_t height, int cell);
-  void RenderSquares(uint8_t* pData, uint16_t width, uint16_t height, const SDL_FRect& target);
-  void RenderScaledDots(uint8_t* pData, uint16_t width, uint16_t height, int scaleFactor, const SDL_FRect& target);
-  void RenderScaledSquares(uint8_t* pData, uint16_t width, uint16_t height, int scaleFactor,
-                           const SDL_FRect& target);
-  void RenderScaledNearest(uint8_t* pData, uint16_t width, uint16_t height, int scaleFactor,
-                           const SDL_FRect& target);
-  void RenderSmoothScaling(uint8_t* pData, uint16_t width, uint16_t height, const SDL_FRect& target);
-  void RenderXBRZ(uint8_t* pData, uint16_t width, uint16_t height, const SDL_FRect& target);
+  bool UploadFrame(const uint8_t* pData, uint16_t width, uint16_t height);
+  bool EnsureMask(uint16_t gridWidth, uint16_t gridHeight, int maskWidth, int maskHeight, MaskShape shape);
+  bool EnsureIntermediate(int width, int height);
+  void RenderDots(const uint8_t* pData, uint16_t width, uint16_t height, int grid, const SDL_FRect& target);
+  void RenderSquares(const uint8_t* pData, uint16_t width, uint16_t height, int grid, const SDL_FRect& target);
+  void RenderScaled(const uint8_t* pData, uint16_t width, uint16_t height, int factor, SDL_ScaleMode finalScaleMode,
+                    const SDL_FRect& target);
+  void RenderXBRZ(const uint8_t* pData, uint16_t width, uint16_t height, const SDL_FRect& target);
 };
 
 SDLDMDAPI SDLDMD* CreateSDLDMD(DMD& dmd, const char* title, uint16_t windowWidth, uint16_t windowHeight,
-                               uint32_t windowFlags, uint16_t width, uint16_t height,
-                               int screenIndex = -1, int windowX = SDL_WINDOWPOS_UNDEFINED,
-                               int windowY = SDL_WINDOWPOS_UNDEFINED,
+                               uint32_t windowFlags, uint16_t width, uint16_t height, int screenIndex = -1,
+                               int windowX = SDL_WINDOWPOS_UNDEFINED, int windowY = SDL_WINDOWPOS_UNDEFINED,
                                SDLDMD::RenderingMode renderingMode = SDLDMD::RenderingMode::Dots,
                                SDLDMD::Rotation rotation = SDLDMD::Rotation::Rotate0,
                                const char* preferredVideoDriver = nullptr);
 SDLDMDAPI SDLDMD* CreateSDLDMD(DMD& dmd, const char* title, uint16_t windowWidth, uint16_t windowHeight,
-                               uint32_t windowFlags, uint16_t width, uint16_t height,
-                               int screenIndex, int windowX, int windowY,
-                               SDLDMD::RenderingMode renderingMode,
-                               const char* preferredVideoDriver);
+                               uint32_t windowFlags, uint16_t width, uint16_t height, int screenIndex, int windowX,
+                               int windowY, SDLDMD::RenderingMode renderingMode, const char* preferredVideoDriver);
 SDLDMDAPI SDLDMDConfig* InstallSDLDMDConfig();
 SDLDMDAPI SDLDMD* CreateSDLDMDFromConfig(DMD& dmd, const char* title, uint16_t width = 128, uint16_t height = 32,
-                                         uint32_t windowFlags = 0,
-                                         const char* preferredVideoDriver = nullptr);
+                                         uint32_t windowFlags = 0, const char* preferredVideoDriver = nullptr);
 SDLDMDAPI bool DestroySDLDMD(DMD& dmd, SDLDMD* pSDLDMD);
 SDLDMDAPI bool SetSDLDMDRenderingMode(SDLDMD* pSDLDMD, SDLDMD::RenderingMode renderingMode);
 SDLDMDAPI bool ParseSDLDMDRenderingMode(const char* value, SDLDMD::RenderingMode* pRenderingMode);

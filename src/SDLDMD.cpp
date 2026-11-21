@@ -21,9 +21,8 @@ SDLDMDConfig* g_installedSDLDMDConfig = nullptr;
 
 std::string ToLower(std::string value)
 {
-  std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
-    return static_cast<char>(std::tolower(c));
-  });
+  std::transform(value.begin(), value.end(), value.begin(),
+                 [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
   return value;
 }
 
@@ -103,10 +102,7 @@ const char* GetDefaultVideoDriver(const char* preferredVideoDriver)
   return preferredVideoDriver;
 }
 
-SDLDMDConfig* GetInstalledSDLDMDConfig()
-{
-  return g_installedSDLDMDConfig;
-}
+SDLDMDConfig* GetInstalledSDLDMDConfig() { return g_installedSDLDMDConfig; }
 
 bool ResolveWindowPositionForScreen(int screenIndex, int windowX, int windowY, int* pResolvedX, int* pResolvedY)
 {
@@ -159,11 +155,20 @@ bool ResolveWindowPositionForScreen(int screenIndex, int windowX, int windowY, i
 
 bool SDLDMD::CreateRendererWithFallbacks()
 {
-  static const char* kRendererCandidates[] = {"opengl", "opengles2", nullptr};
+  // Desktop OpenGL first where there is a desktop. Under KMS/DRM (zedmdos on a
+  // Raspberry Pi) there is only OpenGL ES: trying OpenGL first there built and
+  // threw away a failed context on every start, and on a Pi that is a
+  // noticeable part of bringing the DMD up.
+  static const char* kDesktopCandidates[] = {"opengl", "opengles2", nullptr};
+  static const char* kKmsdrmCandidates[] = {"opengles2", "opengl", nullptr};
+  const char* const videoDriver = SDL_GetCurrentVideoDriver();
+  const bool kmsdrm = videoDriver != nullptr && SDL_strcasecmp(videoDriver, "kmsdrm") == 0;
+  const char* const* candidates = kmsdrm ? kKmsdrmCandidates : kDesktopCandidates;
 
   std::string lastError;
-  for (const char* rendererName : kRendererCandidates)
+  for (const char* const* candidate = candidates;; ++candidate)
   {
+    const char* const rendererName = *candidate;
     m_pRenderer = SDL_CreateRenderer(m_pWindow, rendererName);
     if (m_pRenderer)
     {
@@ -179,6 +184,8 @@ bool SDLDMD::CreateRendererWithFallbacks()
       lastError += ": ";
       lastError += error;
     }
+    // The list ends with nullptr, SDL's own choice, tried last.
+    if (rendererName == nullptr) break;
   }
 
   m_error = lastError.empty() ? "SDL couldn't create a renderer." : lastError;
@@ -187,8 +194,7 @@ bool SDLDMD::CreateRendererWithFallbacks()
 
 SDLDMD::SDLDMD(const char* title, uint16_t windowWidth, uint16_t windowHeight, uint32_t windowFlags, uint16_t width,
                uint16_t height, int screenIndex, int windowX, int windowY, RenderingMode renderingMode,
-               Rotation rotation,
-               const char* preferredVideoDriver)
+               Rotation rotation, const char* preferredVideoDriver)
     : RGB24DMD(width, height),
       m_pRenderer(nullptr),
       m_renderingMode(renderingMode),
@@ -268,9 +274,13 @@ SDLDMD::SDLDMD(const char* title, uint16_t windowWidth, uint16_t windowHeight, u
 SDLDMD::~SDLDMD()
 {
   if (m_pFrameTexture) SDL_DestroyTexture(m_pFrameTexture);
-  if (m_pDotMask) SDL_DestroyTexture(m_pDotMask);
+  if (m_pMask) SDL_DestroyTexture(m_pMask);
+  if (m_pIntermediate) SDL_DestroyTexture(m_pIntermediate);
+  if (m_pXbrzTexture) SDL_DestroyTexture(m_pXbrzTexture);
   m_pFrameTexture = nullptr;
-  m_pDotMask = nullptr;
+  m_pMask = nullptr;
+  m_pIntermediate = nullptr;
+  m_pXbrzTexture = nullptr;
   if (m_pRenderer) SDL_DestroyRenderer(m_pRenderer);
   if (m_pWindow) SDL_DestroyWindow(m_pWindow);
   m_pRenderer = nullptr;
@@ -292,28 +302,18 @@ SDLDMD::~SDLDMD()
 
 SDLDMD* CreateSDLDMD(DMD& dmd, const char* title, uint16_t windowWidth, uint16_t windowHeight, uint32_t windowFlags,
                      uint16_t width, uint16_t height, int screenIndex, int windowX, int windowY,
-                     SDLDMD::RenderingMode renderingMode, SDLDMD::Rotation rotation,
-                     const char* preferredVideoDriver)
+                     SDLDMD::RenderingMode renderingMode, SDLDMD::Rotation rotation, const char* preferredVideoDriver)
 {
   const char* const requestedVideoDriver = GetDefaultVideoDriver(preferredVideoDriver);
   Log(DMDUtil_LogLevel_INFO,
-      "SDLDMD setup: title='%s' window=%ux%u dmd=%ux%u screen=%d x=%d y=%d renderer=%s rotation=%s videoDriver=%s flags=0x%x",
-      title ? title : "",
-      windowWidth,
-      windowHeight,
-      width,
-      height,
-      screenIndex,
-      windowX,
-      windowY,
-      RenderingModeToString(renderingMode),
-      RotationToString(rotation),
-      (requestedVideoDriver && *requestedVideoDriver) ? requestedVideoDriver : "default",
-      windowFlags);
+      "SDLDMD setup: title='%s' window=%ux%u dmd=%ux%u screen=%d x=%d y=%d renderer=%s rotation=%s videoDriver=%s "
+      "flags=0x%x",
+      title ? title : "", windowWidth, windowHeight, width, height, screenIndex, windowX, windowY,
+      RenderingModeToString(renderingMode), RotationToString(rotation),
+      (requestedVideoDriver && *requestedVideoDriver) ? requestedVideoDriver : "default", windowFlags);
 
-  SDLDMD* const pSDLDMD =
-      new SDLDMD(title, windowWidth, windowHeight, windowFlags, width, height, screenIndex, windowX, windowY,
-                 renderingMode, rotation, preferredVideoDriver);
+  SDLDMD* const pSDLDMD = new SDLDMD(title, windowWidth, windowHeight, windowFlags, width, height, screenIndex, windowX,
+                                     windowY, renderingMode, rotation, preferredVideoDriver);
   if (!pSDLDMD->IsReady())
   {
     SDL_SetError("%s", pSDLDMD->GetError() ? pSDLDMD->GetError() : "Unknown SDL DMD error");
@@ -323,10 +323,8 @@ SDLDMD* CreateSDLDMD(DMD& dmd, const char* title, uint16_t windowWidth, uint16_t
 
   dmd.AddRGB24DMD(pSDLDMD);
   const char* const actualVideoDriver = SDL_GetCurrentVideoDriver();
-  Log(DMDUtil_LogLevel_INFO,
-      "SDLDMD setup succeeded: renderer=%s hardware=%d videoDriver=%s",
-      pSDLDMD->GetRendererName() ? pSDLDMD->GetRendererName() : "",
-      pSDLDMD->IsHardwareAccelerated() ? 1 : 0,
+  Log(DMDUtil_LogLevel_INFO, "SDLDMD setup succeeded: renderer=%s hardware=%d videoDriver=%s",
+      pSDLDMD->GetRendererName() ? pSDLDMD->GetRendererName() : "", pSDLDMD->IsHardwareAccelerated() ? 1 : 0,
       (actualVideoDriver && *actualVideoDriver) ? actualVideoDriver : "unknown");
   return pSDLDMD;
 }
@@ -335,8 +333,8 @@ SDLDMD* CreateSDLDMD(DMD& dmd, const char* title, uint16_t windowWidth, uint16_t
                      uint16_t width, uint16_t height, int screenIndex, int windowX, int windowY,
                      SDLDMD::RenderingMode renderingMode, const char* preferredVideoDriver)
 {
-  return CreateSDLDMD(dmd, title, windowWidth, windowHeight, windowFlags, width, height, screenIndex, windowX,
-                      windowY, renderingMode, SDLDMD::Rotation::Rotate0, preferredVideoDriver);
+  return CreateSDLDMD(dmd, title, windowWidth, windowHeight, windowFlags, width, height, screenIndex, windowX, windowY,
+                      renderingMode, SDLDMD::Rotation::Rotate0, preferredVideoDriver);
 }
 
 SDLDMDConfig* InstallSDLDMDConfig()
@@ -399,21 +397,14 @@ SDLDMD* CreateSDLDMDFromConfig(DMD& dmd, const char* title, uint16_t width, uint
 
   Log(DMDUtil_LogLevel_INFO,
       "Creating LCD-DMD output: %dx%d screen=%d x=%d y=%d renderer=%s rotation=%d hd=%d logical=%ux%u",
-      pConfig->GetLCDDMDWidth(),
-      pConfig->GetLCDDMDHeight(),
-      pConfig->GetLCDDMDScreen(),
-      pConfig->GetLCDDMDX(),
-      pConfig->GetLCDDMDY(),
-      pConfig->GetLCDDMDRenderer(),
-      pConfig->GetLCDDMDRotation(),
-      pConfig->IsLCDDMDHD() ? 1 : 0,
-      logicalWidth,
-      logicalHeight);
+      pConfig->GetLCDDMDWidth(), pConfig->GetLCDDMDHeight(), pConfig->GetLCDDMDScreen(), pConfig->GetLCDDMDX(),
+      pConfig->GetLCDDMDY(), pConfig->GetLCDDMDRenderer(), pConfig->GetLCDDMDRotation(), pConfig->IsLCDDMDHD() ? 1 : 0,
+      logicalWidth, logicalHeight);
 
   return CreateSDLDMD(dmd, title, static_cast<uint16_t>(pConfig->GetLCDDMDWidth()),
                       static_cast<uint16_t>(pConfig->GetLCDDMDHeight()), windowFlags, logicalWidth, logicalHeight,
-                      pConfig->GetLCDDMDScreen(),
-                      pConfig->GetLCDDMDX(), pConfig->GetLCDDMDY(), renderingMode, rotation, preferredVideoDriver);
+                      pConfig->GetLCDDMDScreen(), pConfig->GetLCDDMDX(), pConfig->GetLCDDMDY(), renderingMode, rotation,
+                      preferredVideoDriver);
 }
 
 bool DestroySDLDMD(DMD& dmd, SDLDMD* pSDLDMD) { return dmd.DestroyRGB24DMD(pSDLDMD); }
@@ -609,35 +600,35 @@ bool SDLDMD::Render()
   switch (m_renderingMode)
   {
     case RenderingMode::Square:
-      RenderSquares(pRenderData, renderWidth, renderHeight, target);
+      RenderSquares(pRenderData, renderWidth, renderHeight, 1, target);
       break;
 
     case RenderingMode::Scale2x:
-      RenderScaledNearest(pRenderData, renderWidth, renderHeight, 2, target);
+      RenderScaled(pRenderData, renderWidth, renderHeight, 2, SDL_SCALEMODE_NEAREST, target);
       break;
 
     case RenderingMode::Scale4x:
-      RenderScaledNearest(pRenderData, renderWidth, renderHeight, 4, target);
+      RenderScaled(pRenderData, renderWidth, renderHeight, 4, SDL_SCALEMODE_NEAREST, target);
       break;
 
     case RenderingMode::Scale2xDots:
-      RenderScaledDots(pRenderData, renderWidth, renderHeight, 2, target);
+      RenderDots(pRenderData, renderWidth, renderHeight, 2, target);
       break;
 
     case RenderingMode::Scale4xDots:
-      RenderScaledDots(pRenderData, renderWidth, renderHeight, 4, target);
+      RenderDots(pRenderData, renderWidth, renderHeight, 4, target);
       break;
 
     case RenderingMode::Scale2xSquares:
-      RenderScaledSquares(pRenderData, renderWidth, renderHeight, 2, target);
+      RenderSquares(pRenderData, renderWidth, renderHeight, 2, target);
       break;
 
     case RenderingMode::Scale4xSquares:
-      RenderScaledSquares(pRenderData, renderWidth, renderHeight, 4, target);
+      RenderSquares(pRenderData, renderWidth, renderHeight, 4, target);
       break;
 
     case RenderingMode::SmoothScaling:
-      RenderSmoothScaling(pRenderData, renderWidth, renderHeight, target);
+      RenderScaled(pRenderData, renderWidth, renderHeight, 4, SDL_SCALEMODE_LINEAR, target);
       break;
 
     case RenderingMode::XBRZ:
@@ -645,7 +636,7 @@ bool SDLDMD::Render()
       break;
 
     default:
-      RenderDots(pRenderData, renderWidth, renderHeight, target);
+      RenderDots(pRenderData, renderWidth, renderHeight, 1, target);
       break;
   }
 
@@ -673,8 +664,7 @@ SDL_FRect SDLDMD::GetTargetRect(uint16_t width, uint16_t height) const
   SDL_FRect area = {0.0f, 0.0f, static_cast<float>(outputWidth), static_cast<float>(outputHeight)};
 
   const bool windowIsAsRequested = windowWidth == m_requestedWidth && windowHeight == m_requestedHeight;
-  if (!windowIsAsRequested && windowWidth > 0 && windowHeight > 0 && m_requestedWidth > 0 &&
-      m_requestedHeight > 0)
+  if (!windowIsAsRequested && windowWidth > 0 && windowHeight > 0 && m_requestedWidth > 0 && m_requestedHeight > 0)
   {
     // Requested in window coordinates; the output may have more pixels than
     // that on a high-density display.
@@ -710,259 +700,283 @@ SDL_FRect SDLDMD::GetTargetRect(uint16_t width, uint16_t height) const
   const float scale = std::min(area.w / width, area.h / height);
   const float targetWidth = width * scale;
   const float targetHeight = height * scale;
-  return {area.x + (area.w - targetWidth) / 2.0f, area.y + (area.h - targetHeight) / 2.0f, targetWidth,
-          targetHeight};
+  return {area.x + (area.w - targetWidth) / 2.0f, area.y + (area.h - targetHeight) / 2.0f, targetWidth, targetHeight};
 }
 
 // The frame as a texture at its own resolution, created once per size.
+//
+// RGBX rather than the RGB24 the frames come in: OpenGL ES has no 24-bit
+// texture format, so SDL backed an RGB24 texture with a 32-bit one and
+// converted every upload through a scratch buffer of its own. Converting
+// straight into the locked texture is the same work done once.
 bool SDLDMD::EnsureFrameTexture(uint16_t width, uint16_t height)
 {
   if (m_pFrameTexture && m_frameTextureWidth == width && m_frameTextureHeight == height) return true;
   if (m_pFrameTexture) SDL_DestroyTexture(m_pFrameTexture);
-  m_pFrameTexture =
-      SDL_CreateTexture(m_pRenderer, SDL_PIXELFORMAT_RGB24, SDL_TEXTUREACCESS_STREAMING, width, height);
-  if (!m_pFrameTexture) return false;
-  SDL_SetTextureScaleMode(m_pFrameTexture, SDL_SCALEMODE_NEAREST);
+  m_pFrameTexture = SDL_CreateTexture(m_pRenderer, SDL_PIXELFORMAT_RGBX32, SDL_TEXTUREACCESS_STREAMING, width, height);
+  if (!m_pFrameTexture)
+  {
+    m_frameTextureWidth = 0;
+    m_frameTextureHeight = 0;
+    return false;
+  }
   m_frameTextureWidth = width;
   m_frameTextureHeight = height;
   return true;
 }
 
-// Black everywhere but a round hole per dot, `cell` output pixels to a dot.
-// The same circle the per-pixel drawing used: radius cell / 2, rounded down,
-// centred on the cell's middle pixel.
-bool SDLDMD::EnsureDotMask(uint16_t width, uint16_t height, int cell)
+bool SDLDMD::UploadFrame(const uint8_t* pData, uint16_t width, uint16_t height)
 {
-  if (m_pDotMask && m_dotMaskWidth == width && m_dotMaskHeight == height && m_dotMaskCell == cell) return true;
-  if (m_pDotMask) SDL_DestroyTexture(m_pDotMask);
-  m_pDotMask = nullptr;
-
-  const int maskWidth = width * cell;
-  const int maskHeight = height * cell;
-  std::vector<uint8_t> cellAlpha(static_cast<size_t>(cell) * cell);
-  const int radius = cell / 2;
-  const int centre = static_cast<int>(cell / 2.0f);
-  for (int y = 0; y < cell; ++y)
+  if (width == 0 || height == 0 || !EnsureFrameTexture(width, height)) return false;
+  void* pixels = nullptr;
+  int pitch = 0;
+  if (!SDL_LockTexture(m_pFrameTexture, nullptr, &pixels, &pitch)) return false;
+  for (uint16_t y = 0; y < height; ++y)
   {
-    for (int x = 0; x < cell; ++x)
+    const uint8_t* src = pData + static_cast<size_t>(y) * width * 3u;
+    uint8_t* dst = static_cast<uint8_t*>(pixels) + static_cast<size_t>(y) * pitch;
+    for (uint16_t x = 0; x < width; ++x)
     {
-      const int dx = x - centre;
-      const int dy = y - centre;
-      cellAlpha[static_cast<size_t>(y) * cell + x] = dx * dx + dy * dy <= radius * radius ? 0 : 255;
+      dst[0] = src[0];
+      dst[1] = src[1];
+      dst[2] = src[2];
+      dst[3] = 255;
+      src += 3;
+      dst += 4;
     }
   }
-
-  std::vector<uint8_t> pixels(static_cast<size_t>(maskWidth) * maskHeight * 4u, 0);
-  for (int y = 0; y < maskHeight; ++y)
-  {
-    const uint8_t* rowAlpha = &cellAlpha[static_cast<size_t>(y % cell) * cell];
-    uint8_t* row = &pixels[static_cast<size_t>(y) * maskWidth * 4u];
-    for (int x = 0; x < maskWidth; ++x)
-    {
-      row[x * 4 + 3] = rowAlpha[x % cell];
-    }
-  }
-
-  m_pDotMask = SDL_CreateTexture(m_pRenderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STATIC, maskWidth, maskHeight);
-  if (!m_pDotMask) return false;
-  SDL_UpdateTexture(m_pDotMask, nullptr, pixels.data(), maskWidth * 4);
-  SDL_SetTextureBlendMode(m_pDotMask, SDL_BLENDMODE_BLEND);
-  SDL_SetTextureScaleMode(m_pDotMask, SDL_SCALEMODE_NEAREST);
-  m_dotMaskWidth = width;
-  m_dotMaskHeight = height;
-  m_dotMaskCell = cell;
+  SDL_UnlockTexture(m_pFrameTexture);
   return true;
 }
 
-// Each pixel of the frame as a round dot.
-//
-// This used to draw every dot point by point: one SDL_RenderPoint per output
-// pixel of every lit dot, some 150 for a dot at 1920x480 and up to 600000 a
-// frame. That was tolerable on libdmdutil's own thread, but the DMD is drawn
-// from ppuc's main loop now, which also runs the lamps, the rules and the
-// switch holds, and a busy animation stalled all of them. Now it is two draws:
-// the frame scaled up to the target without smoothing, and over it a mask,
-// built once per size, that is black except for a round hole per dot.
-void SDLDMD::RenderDots(uint8_t* pData, uint16_t width, uint16_t height, const SDL_FRect& target)
+namespace
 {
-  if (width == 0 || height == 0) return;
-  // Rounded down, as the dot radius always was.
-  const int cell = std::max(2, static_cast<int>(target.w / width));
-  if (!EnsureFrameTexture(width, height) || !EnsureDotMask(width, height, cell))
+// Where cell `index` of `cells` starts in a span of `pixels` pixels: rounded
+// to the nearest whole pixel, in integers so that the colours and the gaps of
+// the square renderer are cut at exactly the same places.
+int CellEdge(int index, int pixels, int cells)
+{
+  return static_cast<int>((2ll * index * pixels + cells) / (2ll * cells));
+}
+}  // namespace
+
+// Black everywhere but the lit part of each cell, built once per size and
+// shape, `gridWidth` x `gridHeight` cells over `maskWidth` x `maskHeight`
+// pixels.
+//
+// A dot is the circle the per-pixel drawing used: radius cell / 2, rounded
+// down, centred on the cell's middle pixel, in a mask of whole cells that is
+// then stretched to the target.
+//
+// A square is lit but for a one pixel black line on the right and at the
+// bottom of each cell, as the per-pixel rectangles were. That mask is built at
+// the target's own size, drawn one to one, with its gaps on the cell edges of
+// CellEdge() -- the edges RenderSquares() draws the colours to. A cell under
+// two pixels wide has no gap across, as a rectangle that narrow had none.
+bool SDLDMD::EnsureMask(uint16_t gridWidth, uint16_t gridHeight, int maskWidth, int maskHeight, MaskShape shape)
+{
+  if (m_pMask && m_maskGridWidth == gridWidth && m_maskGridHeight == gridHeight && m_maskWidth == maskWidth &&
+      m_maskHeight == maskHeight && m_maskShape == shape)
+  {
+    return true;
+  }
+  if (m_pMask) SDL_DestroyTexture(m_pMask);
+  m_pMask = nullptr;
+  if (gridWidth == 0 || gridHeight == 0 || maskWidth <= 0 || maskHeight <= 0) return false;
+
+  std::vector<uint8_t> pixels(static_cast<size_t>(maskWidth) * maskHeight * 4u, 0);
+  if (shape == MaskShape::Dot)
+  {
+    const int cell = maskWidth / gridWidth;
+    const int radius = cell / 2;
+    const int centre = static_cast<int>(cell / 2.0f);
+    for (int y = 0; y < maskHeight; ++y)
+    {
+      uint8_t* row = &pixels[static_cast<size_t>(y) * maskWidth * 4u];
+      const int dy = y % cell - centre;
+      for (int x = 0; x < maskWidth; ++x)
+      {
+        const int dx = x % cell - centre;
+        row[x * 4 + 3] = dx * dx + dy * dy <= radius * radius ? 0 : 255;
+      }
+    }
+  }
+  else
+  {
+    // For each column and each row: 255 on the last pixel of a cell.
+    auto gaps = [](int span, int cells)
+    {
+      std::vector<uint8_t> gap(static_cast<size_t>(span), 0);
+      for (int c = 0; c < cells; ++c)
+      {
+        const int start = CellEdge(c, span, cells);
+        const int end = CellEdge(c + 1, span, cells);
+        if (end - start >= 2) gap[static_cast<size_t>(end - 1)] = 255;
+      }
+      return gap;
+    };
+    const std::vector<uint8_t> columns = gaps(maskWidth, gridWidth);
+    const std::vector<uint8_t> rows = gaps(maskHeight, gridHeight);
+    for (int y = 0; y < maskHeight; ++y)
+    {
+      uint8_t* row = &pixels[static_cast<size_t>(y) * maskWidth * 4u];
+      for (int x = 0; x < maskWidth; ++x)
+      {
+        row[x * 4 + 3] = std::max(columns[static_cast<size_t>(x)], rows[static_cast<size_t>(y)]);
+      }
+    }
+  }
+
+  m_pMask = SDL_CreateTexture(m_pRenderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STATIC, maskWidth, maskHeight);
+  if (!m_pMask) return false;
+  SDL_UpdateTexture(m_pMask, nullptr, pixels.data(), maskWidth * 4);
+  SDL_SetTextureBlendMode(m_pMask, SDL_BLENDMODE_BLEND);
+  SDL_SetTextureScaleMode(m_pMask, SDL_SCALEMODE_NEAREST);
+  m_maskGridWidth = gridWidth;
+  m_maskGridHeight = gridHeight;
+  m_maskWidth = maskWidth;
+  m_maskHeight = maskHeight;
+  m_maskShape = shape;
+  return true;
+}
+
+// Each pixel of the frame as round dots, `grid` of them to a pixel across and
+// down (scale2x-dots is a grid of 2).
+//
+// Two draws: the frame scaled up to the target without smoothing, and over it
+// the mask. This used to draw point by point (up to 600000 SDL_RenderPoint
+// calls a frame), and for the scaled variants first blew the frame up on the
+// CPU into a freshly allocated buffer. The DMD is drawn from ppuc's main loop,
+// so all of that was time taken from everything else it does.
+void SDLDMD::RenderDots(const uint8_t* pData, uint16_t width, uint16_t height, int grid, const SDL_FRect& target)
+{
+  if (width == 0 || height == 0 || grid < 1) return;
+  const uint16_t gridWidth = static_cast<uint16_t>(width * grid);
+  const uint16_t gridHeight = static_cast<uint16_t>(height * grid);
+  if (!UploadFrame(pData, width, height)) return;
+  SDL_SetTextureScaleMode(m_pFrameTexture, SDL_SCALEMODE_NEAREST);
+  SDL_RenderTexture(m_pRenderer, m_pFrameTexture, nullptr, &target);
+  // Rounded down, as the dot radius always was, and at least two pixels:
+  // below that a dot is not a dot at all.
+  const int cell = std::max(2, static_cast<int>(target.w / gridWidth));
+  if (!EnsureMask(gridWidth, gridHeight, gridWidth * cell, gridHeight * cell, MaskShape::Dot)) return;
+  SDL_RenderTexture(m_pRenderer, m_pMask, nullptr, &target);
+}
+
+// Each pixel of the frame as squares with a one pixel gap, `grid` of them to a
+// pixel across and down.
+//
+// The colours go out as one batch of rectangles, a rectangle per frame pixel
+// with whole-pixel edges, and the gaps as a mask cut at the same edges. A frame
+// texture stretched to the target cannot do it: wherever a cell is not a whole
+// number of pixels, which cell the pixel on an edge gets is the renderer's
+// rounding, GPUs differ in it, and a gap one pixel off the colour edge shows
+// a sliver of the neighbouring square. This used to be one SDL_RenderFillRect
+// per lit square, and for the scaled variants a CPU blow-up of the frame
+// first.
+void SDLDMD::RenderSquares(const uint8_t* pData, uint16_t width, uint16_t height, int grid, const SDL_FRect& target)
+{
+  if (width == 0 || height == 0 || grid < 1) return;
+  const int gridWidth = width * grid;
+  const int gridHeight = height * grid;
+  const int left = static_cast<int>(target.x + 0.5f);
+  const int top = static_cast<int>(target.y + 0.5f);
+  const int spanWidth = static_cast<int>(target.w + 0.5f);
+  const int spanHeight = static_cast<int>(target.h + 0.5f);
+  if (spanWidth <= 0 || spanHeight <= 0) return;
+
+  m_squareVertices.clear();
+  m_squareIndices.clear();
+  for (int y = 0; y < height; ++y)
+  {
+    const float y0 = static_cast<float>(top + CellEdge(y * grid, spanHeight, gridHeight));
+    const float y1 = static_cast<float>(top + CellEdge((y + 1) * grid, spanHeight, gridHeight));
+    for (int x = 0; x < width; ++x)
+    {
+      const uint8_t* p = pData + (static_cast<size_t>(y) * width + x) * 3u;
+      if (p[0] == 0 && p[1] == 0 && p[2] == 0) continue;  // the background is black already
+      const float x0 = static_cast<float>(left + CellEdge(x * grid, spanWidth, gridWidth));
+      const float x1 = static_cast<float>(left + CellEdge((x + 1) * grid, spanWidth, gridWidth));
+      const SDL_FColor color = {p[0] / 255.0f, p[1] / 255.0f, p[2] / 255.0f, 1.0f};
+      const int base = static_cast<int>(m_squareVertices.size());
+      m_squareVertices.push_back({{x0, y0}, color, {0.0f, 0.0f}});
+      m_squareVertices.push_back({{x1, y0}, color, {0.0f, 0.0f}});
+      m_squareVertices.push_back({{x1, y1}, color, {0.0f, 0.0f}});
+      m_squareVertices.push_back({{x0, y1}, color, {0.0f, 0.0f}});
+      for (int i : {0, 1, 2, 0, 2, 3}) m_squareIndices.push_back(base + i);
+    }
+  }
+  if (!m_squareVertices.empty())
+  {
+    SDL_RenderGeometry(m_pRenderer, nullptr, m_squareVertices.data(), static_cast<int>(m_squareVertices.size()),
+                       m_squareIndices.data(), static_cast<int>(m_squareIndices.size()));
+  }
+
+  // Too small for a gap in either direction: the colours alone are the picture.
+  if (spanWidth < 2 * gridWidth && spanHeight < 2 * gridHeight) return;
+  if (!EnsureMask(static_cast<uint16_t>(gridWidth), static_cast<uint16_t>(gridHeight), spanWidth, spanHeight,
+                  MaskShape::Square))
   {
     return;
   }
-  SDL_UpdateTexture(m_pFrameTexture, nullptr, pData, width * 3);
-  SDL_RenderTexture(m_pRenderer, m_pFrameTexture, nullptr, &target);
-  SDL_RenderTexture(m_pRenderer, m_pDotMask, nullptr, &target);
+  const SDL_FRect maskRect = {static_cast<float>(left), static_cast<float>(top), static_cast<float>(spanWidth),
+                              static_cast<float>(spanHeight)};
+  SDL_RenderTexture(m_pRenderer, m_pMask, nullptr, &maskRect);
 }
 
-void SDLDMD::RenderScaledDots(uint8_t* pData, uint16_t width, uint16_t height, int scaleFactor,
-                              const SDL_FRect& target)
+bool SDLDMD::EnsureIntermediate(int width, int height)
 {
-  const uint16_t scaledWidth = static_cast<uint16_t>(width * scaleFactor);
-  const uint16_t scaledHeight = static_cast<uint16_t>(height * scaleFactor);
-  std::vector<uint8_t> scaledBuffer(static_cast<size_t>(scaledWidth) * scaledHeight * 3u);
-
-  for (uint16_t y = 0; y < height; ++y)
+  if (m_pIntermediate && m_intermediateWidth == width && m_intermediateHeight == height) return true;
+  if (m_pIntermediate) SDL_DestroyTexture(m_pIntermediate);
+  m_pIntermediate = SDL_CreateTexture(m_pRenderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_TARGET, width, height);
+  if (!m_pIntermediate)
   {
-    for (uint16_t x = 0; x < width; ++x)
-    {
-      const size_t srcIndex = (static_cast<size_t>(y) * width + x) * 3u;
-      for (int dy = 0; dy < scaleFactor; ++dy)
-      {
-        for (int dx = 0; dx < scaleFactor; ++dx)
-        {
-          const uint16_t dstX = static_cast<uint16_t>(x * scaleFactor + dx);
-          const uint16_t dstY = static_cast<uint16_t>(y * scaleFactor + dy);
-          const size_t dstIndex = (static_cast<size_t>(dstY) * scaledWidth + dstX) * 3u;
-          scaledBuffer[dstIndex] = pData[srcIndex];
-          scaledBuffer[dstIndex + 1] = pData[srcIndex + 1];
-          scaledBuffer[dstIndex + 2] = pData[srcIndex + 2];
-        }
-      }
-    }
+    m_intermediateWidth = 0;
+    m_intermediateHeight = 0;
+    return false;
   }
-
-  RenderDots(scaledBuffer.data(), scaledWidth, scaledHeight, target);
+  m_intermediateWidth = width;
+  m_intermediateHeight = height;
+  return true;
 }
 
-void SDLDMD::RenderScaledSquares(uint8_t* pData, uint16_t width, uint16_t height, int scaleFactor,
-                                 const SDL_FRect& target)
+// The frame blown up `factor` times without smoothing on the GPU, then drawn
+// to the target with `finalScaleMode`: nearest for scale2x/scale4x, linear for
+// smooth. Both textures live as long as the size does; they used to be
+// created and destroyed for every frame.
+void SDLDMD::RenderScaled(const uint8_t* pData, uint16_t width, uint16_t height, int factor,
+                          SDL_ScaleMode finalScaleMode, const SDL_FRect& target)
 {
-  const uint16_t scaledWidth = static_cast<uint16_t>(width * scaleFactor);
-  const uint16_t scaledHeight = static_cast<uint16_t>(height * scaleFactor);
-  std::vector<uint8_t> scaledBuffer(static_cast<size_t>(scaledWidth) * scaledHeight * 3u);
+  if (!UploadFrame(pData, width, height) || !EnsureIntermediate(width * factor, height * factor)) return;
 
-  for (uint16_t y = 0; y < height; ++y)
-  {
-    for (uint16_t x = 0; x < width; ++x)
-    {
-      const size_t srcIndex = (static_cast<size_t>(y) * width + x) * 3u;
-      for (int dy = 0; dy < scaleFactor; ++dy)
-      {
-        for (int dx = 0; dx < scaleFactor; ++dx)
-        {
-          const uint16_t dstX = static_cast<uint16_t>(x * scaleFactor + dx);
-          const uint16_t dstY = static_cast<uint16_t>(y * scaleFactor + dy);
-          const size_t dstIndex = (static_cast<size_t>(dstY) * scaledWidth + dstX) * 3u;
-          scaledBuffer[dstIndex] = pData[srcIndex];
-          scaledBuffer[dstIndex + 1] = pData[srcIndex + 1];
-          scaledBuffer[dstIndex + 2] = pData[srcIndex + 2];
-        }
-      }
-    }
-  }
-
-  RenderSquares(scaledBuffer.data(), scaledWidth, scaledHeight, target);
-}
-
-void SDLDMD::RenderSquares(uint8_t* pData, uint16_t width, uint16_t height, const SDL_FRect& target)
-{
-  const float pixelWidth = target.w / width;
-  const float pixelHeight = target.h / height;
-
-  for (int y = 0; y < height; ++y)
-  {
-    for (int x = 0; x < width; ++x)
-    {
-      const int idx = (y * width + x) * 3;
-      const uint8_t r = pData[idx];
-      const uint8_t g = pData[idx + 1];
-      const uint8_t b = pData[idx + 2];
-
-      if (r == 0 && g == 0 && b == 0) continue;
-
-      SDL_SetRenderDrawColor(m_pRenderer, r, g, b, 255);
-
-      SDL_FRect rect = {
-          target.x + x * pixelWidth,
-          target.y + y * pixelHeight,
-          pixelWidth,
-          pixelHeight,
-      };
-
-      // Keep a 1px black border between adjacent pixels.
-      if (rect.w > 1.0f)
-      {
-        rect.w -= 1.0f;
-      }
-      if (rect.h > 1.0f)
-      {
-        rect.h -= 1.0f;
-      }
-
-      SDL_RenderFillRect(m_pRenderer, &rect);
-    }
-  }
-}
-
-void SDLDMD::RenderScaledNearest(uint8_t* pData, uint16_t width, uint16_t height, int scaleFactor,
-                                 const SDL_FRect& target)
-{
-  SDL_Texture* srcTexture =
-      SDL_CreateTexture(m_pRenderer, SDL_PIXELFORMAT_RGB24, SDL_TEXTUREACCESS_STATIC, width, height);
-  SDL_UpdateTexture(srcTexture, nullptr, pData, width * 3);
-
-  const int intermediateW = width * scaleFactor;
-  const int intermediateH = height * scaleFactor;
-  SDL_Texture* intermediate =
-      SDL_CreateTexture(m_pRenderer, SDL_PIXELFORMAT_RGB24, SDL_TEXTUREACCESS_TARGET, intermediateW, intermediateH);
-
-  SDL_SetRenderTarget(m_pRenderer, intermediate);
-  SDL_SetTextureScaleMode(srcTexture, SDL_SCALEMODE_NEAREST);
+  SDL_SetRenderTarget(m_pRenderer, m_pIntermediate);
+  SDL_SetTextureScaleMode(m_pFrameTexture, SDL_SCALEMODE_NEAREST);
   SDL_SetRenderDrawColor(m_pRenderer, 0, 0, 0, 255);
   SDL_RenderClear(m_pRenderer);
-  SDL_RenderTexture(m_pRenderer, srcTexture, nullptr, nullptr);
+  SDL_RenderTexture(m_pRenderer, m_pFrameTexture, nullptr, nullptr);
 
   SDL_SetRenderTarget(m_pRenderer, nullptr);
-  SDL_SetTextureScaleMode(intermediate, SDL_SCALEMODE_NEAREST);
-  SDL_RenderTexture(m_pRenderer, intermediate, nullptr, &target);
-
-  SDL_DestroyTexture(intermediate);
-  SDL_DestroyTexture(srcTexture);
+  SDL_SetTextureScaleMode(m_pIntermediate, finalScaleMode);
+  SDL_RenderTexture(m_pRenderer, m_pIntermediate, nullptr, &target);
 }
 
-void SDLDMD::RenderSmoothScaling(uint8_t* pData, uint16_t width, uint16_t height, const SDL_FRect& target)
+// xBRZ runs on the CPU, so the most it can be spared is everything around it:
+// its buffers and its texture are kept from frame to frame.
+void SDLDMD::RenderXBRZ(const uint8_t* pData, uint16_t width, uint16_t height, const SDL_FRect& target)
 {
-  SDL_Texture* srcTexture =
-      SDL_CreateTexture(m_pRenderer, SDL_PIXELFORMAT_RGB24, SDL_TEXTUREACCESS_STATIC, width, height);
-  SDL_UpdateTexture(srcTexture, nullptr, pData, width * 3);
-
-  int intermediateW = width * 4;
-  int intermediateH = height * 4;
-  SDL_Texture* intermediate =
-      SDL_CreateTexture(m_pRenderer, SDL_PIXELFORMAT_RGB24, SDL_TEXTUREACCESS_TARGET, intermediateW, intermediateH);
-
-  SDL_SetRenderTarget(m_pRenderer, intermediate);
-  SDL_SetTextureScaleMode(srcTexture, SDL_SCALEMODE_NEAREST);
-  SDL_RenderTexture(m_pRenderer, srcTexture, nullptr, nullptr);
-
-  SDL_SetRenderTarget(m_pRenderer, nullptr);
-  SDL_SetTextureScaleMode(intermediate, SDL_SCALEMODE_LINEAR);
-  SDL_RenderTexture(m_pRenderer, intermediate, nullptr, &target);
-
-  SDL_DestroyTexture(srcTexture);
-  SDL_DestroyTexture(intermediate);
-}
-
-void SDLDMD::RenderXBRZ(uint8_t* pData, uint16_t width, uint16_t height, const SDL_FRect& target)
-{
+  constexpr size_t kScaleFactor = 6;
   const int srcWidth = width;
   const int srcHeight = height;
-  std::vector<uint32_t> srcImage(srcWidth * srcHeight);
+  if (srcWidth == 0 || srcHeight == 0) return;
+  const int scaledWidth = srcWidth * static_cast<int>(kScaleFactor);
+  const int scaledHeight = srcHeight * static_cast<int>(kScaleFactor);
 
-  for (int y = 0; y < srcHeight; ++y)
+  m_xbrzSource.resize(static_cast<size_t>(srcWidth) * srcHeight);
+  m_xbrzScaled.resize(static_cast<size_t>(scaledWidth) * scaledHeight);
+  for (size_t i = 0; i < m_xbrzSource.size(); ++i)
   {
-    for (int x = 0; x < srcWidth; ++x)
-    {
-      int i = y * srcWidth + x;
-      int j = i * 3;
-      uint8_t r = pData[j];
-      uint8_t g = pData[j + 1];
-      uint8_t b = pData[j + 2];
-      srcImage[i] = (255u << 24) | (r << 16) | (g << 8) | b;
-    }
+    const uint8_t* p = pData + i * 3u;
+    m_xbrzSource[i] = (255u << 24) | (static_cast<uint32_t>(p[0]) << 16) | (static_cast<uint32_t>(p[1]) << 8) | p[2];
   }
 
   xbrz::ScalerCfg cfg;
@@ -971,23 +985,21 @@ void SDLDMD::RenderXBRZ(uint8_t* pData, uint16_t width, uint16_t height, const S
   cfg.centerDirectionBias = 4.0;
   cfg.dominantDirectionThreshold = 3.6;
   cfg.steepDirectionThreshold = 2.2;
+  xbrz::scale(kScaleFactor, m_xbrzSource.data(), m_xbrzScaled.data(), srcWidth, srcHeight, xbrz::ColorFormat::ARGB, cfg,
+              0, srcHeight);
 
-  const size_t scaleFactor = 6;
-  const int scaledWidth = srcWidth * scaleFactor;
-  const int scaledHeight = srcHeight * scaleFactor;
-  std::vector<uint32_t> dstImage(scaledWidth * scaledHeight);
-
-  xbrz::scale(scaleFactor, srcImage.data(), dstImage.data(), srcWidth, srcHeight, xbrz::ColorFormat::ARGB, cfg, 0,
-              srcHeight);
-
-  SDL_Texture* texture =
-      SDL_CreateTexture(m_pRenderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STATIC, scaledWidth, scaledHeight);
-
-  SDL_UpdateTexture(texture, nullptr, dstImage.data(), scaledWidth * sizeof(uint32_t));
-
-  SDL_RenderTexture(m_pRenderer, texture, nullptr, &target);
-
-  SDL_DestroyTexture(texture);
+  if (!m_pXbrzTexture || m_xbrzTextureWidth != scaledWidth || m_xbrzTextureHeight != scaledHeight)
+  {
+    if (m_pXbrzTexture) SDL_DestroyTexture(m_pXbrzTexture);
+    // ARGB8888 is what xBRZ writes, and a format OpenGL ES takes as it is.
+    m_pXbrzTexture = SDL_CreateTexture(m_pRenderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, scaledWidth,
+                                       scaledHeight);
+    m_xbrzTextureWidth = m_pXbrzTexture ? scaledWidth : 0;
+    m_xbrzTextureHeight = m_pXbrzTexture ? scaledHeight : 0;
+    if (!m_pXbrzTexture) return;
+  }
+  SDL_UpdateTexture(m_pXbrzTexture, nullptr, m_xbrzScaled.data(), scaledWidth * static_cast<int>(sizeof(uint32_t)));
+  SDL_RenderTexture(m_pRenderer, m_pXbrzTexture, nullptr, &target);
 }
 
 }  // namespace DMDUtil
